@@ -1,0 +1,26 @@
+# Literature Verification Records
+
+Per-source 3D verification: bibliographic authenticity, actual access scope, support level for specific claims.
+
+- verifier:
+- verification_date:
+- source_id: (matches references.bib key)
+
+## Bibliographic Authenticity
+- title_match: pass | fail | partial
+- author_match: pass | fail | partial
+- version_match: pass | fail | partial
+- publication_info_match: pass | fail | partial
+- identifier_check (DOI/ISBN/etc): pass | fail | partial | not_applicable
+- notes:
+
+## Access Scope
+- full_text | abstract | official_record | excerpt | metadata_only
+- access_date:
+- access_url:
+- access_limitations:
+
+## Claim Support Level
+- claim_in_body: (specific paragraph or section referencing this source)
+- support_level: full_support | partial_support | background_only | not_supporting
+- notes:

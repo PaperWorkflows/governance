@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LayoutProfile",
+  "description": "Structure-identity keys for a layout profile (L0/L1/L2). additionalProperties: false per PF-B3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile", "kind"],
+  "properties": {
+    "profile": {
+      "type": "string",
+      "description": "Profile name or ID (structure-identity key, not overridable by paper config)"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["draft", "venue", "paper"],
+      "description": "Profile kind (structure-identity key, not overridable by paper config)"
+    },
+    "target_venue": {
+      "type": "string",
+      "description": "Target venue identifier (structure-identity key, not overridable by paper config)"
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Page geometry and margins",
+      "required": ["size", "margin"],
+      "properties": {
+        "size": {
+          "type": "string",
+          "enum": ["A4", "A3", "letter", "legal"],
+          "description": "Paper size"
+        },
+        "margin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["top", "bottom", "left", "right"],
+          "properties": {
+            "top":    { "type": "number", "description": "Top margin in mm" },
+            "bottom": { "type": "number", "description": "Bottom margin in mm" },
+            "left":   { "type": "number", "description": "Left margin in mm" },
+            "right":  { "type": "number", "description": "Right margin in mm" }
+          }
+        }
+      }
+    },
+    "typography": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Typographic settings (optional). Per PF-B3 the draft defaults (12pt body, 1.5x line spacing) are overridable, so this key is NOT a structure-identity key and may be set by paper config.",
+      "properties": {
+        "body_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Body font size in points (draft default: 12)"
+        },
+        "line_spacing": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Line spacing multiplier (draft default: 1.5)"
+        },
+        "east_asia_font": {
+          "type": "string",
+          "description": "East Asian (CJK) font family name (draft default: Noto Serif SC)"
+        },
+        "latin_font": {
+          "type": "string",
+          "description": "Latin font family name (optional; omit to let the build toolchain fall back to its default serif)"
+        }
+      }
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Citation style settings (structure-identity key, not overridable by paper config)",
+      "required": ["style"],
+      "properties": {
+        "style": {
+          "type": "string",
+          "description": "Citation style identifier (e.g., gb-7714-2025)"
+        }
+      }
+    },
+    "formulas": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Formula rendering settings (structure-identity key, not overridable by paper config)",
+      "required": ["renderer"],
+      "properties": {
+        "renderer": {
+          "type": "string",
+          "description": "Formula renderer identifier"
+        }
+      }
+    }
+  }
+}

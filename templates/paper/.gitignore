@@ -1,0 +1,30 @@
+# Paper repo .gitignore
+# Temporary materials — must not be committed
+temp/
+output/
+_build/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Large binary data (use Git LFS for versioned data)
+*.h5
+*.pkl
+*.pickle
+*.parquet

@@ -1,0 +1,56 @@
+schema_version: 1
+template: true
+id: null
+paper_version: 0.1.0
+repository_mode: per_paper_independent
+title: null
+authors_confirmed: false
+authors_confirmation: null
+authors: []                       # References authors.yaml entries by author_id
+language: zh
+bilingual_abstract: true
+full_english_body: false
+paper_type: null
+stage: intake
+stage_state: active
+manuscript_kind: research
+rules_version: null
+applicable_rules: []
+rule_exemptions: []
+layout_profile: draft
+citation_profile: null
+target_venue: null
+budget:
+  confirmed: false
+  limits: null
+isolation_profile: null
+unresolved: []
+next_step: null
+body_target_chars: 15000
+chapters:
+  - number: 1
+    slug: introduction
+    title: Introduction
+  - number: 2
+    slug: background
+    title: Background and Related Work
+  - number: 3
+    slug: method
+    title: Method
+  - number: 4
+    slug: experiment
+    title: Experiment and Evaluation
+  - number: 5
+    slug: results
+    title: Results
+  - number: 6
+    slug: discussion
+    title: Discussion
+  - number: 7
+    slug: conclusion
+    title: Conclusion
+safety:
+  hooks: pending
+  isolation: pending
+  independent_backup: pending
+  publishing: disabled

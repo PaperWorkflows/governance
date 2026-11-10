@@ -1,0 +1,10 @@
+# Funding Information (optional)
+
+List all funding sources for this paper.
+Leave empty if no funding.
+
+- name: "National Natural Science Foundation of China"
+  id: "NSFC-12345678"
+  role: "This work was supported by ..."
+  # grant_number: "12345678"
+  # url: "https://..."

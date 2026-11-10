@@ -1,0 +1,14 @@
+# PaperFactory governance repo (.gitignore)
+# Paper workspaces are independent repos; they live under papers/ but are not committed here.
+
+papers/
+temp/
+*.pyc
+__pycache__/
+.venv/
+venv/
+.env
+.DS_Store
+*.swp
+*.swo
+*~

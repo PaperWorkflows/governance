@@ -1,0 +1,26 @@
+# Build Layout Overrides（L2 论文级覆盖层，PF-B3/PF-B10）
+#
+# 原散文内容（GC-2026-1111-01 修复 2026-11-11，保留为注释）：
+#   Build Layout Overrides
+#   Paper-level overrides for the selected layout profile.
+#   See governance/build.md PF-B3 for layering rules.
+#
+# 缺陷说明：原模板第 3–4 行散文未加 "#"，YAML 解析结果为字符串标量（非对象），
+# 不满足 schemas/layout-profile.schema.json（required: profile/kind,
+# additionalProperties: false）。三篇论文（P1/P2/P3）同型缺陷已逐 paper 修复
+# （见各论文 reviews/20261111-round2/closure.md），本文件为模板层同型修复，
+# 与论文修复版保持一致。
+#
+# 默认值：A4、25.4mm 四边边距来自 L0 draft profile（templates/layout/profiles/draft.yaml，
+# 经 templates/layout/registry.yaml 登记）；typography（12pt 正文、1.5 倍行距、东亚字体）
+# 亦由 L0 档位承载，本层无需重复；确需覆写 typography 时在本文件按键覆盖（PF-B3 可覆盖键）。
+
+profile: draft
+kind: paper
+page:
+  size: A4
+  margin:
+    top: 25.4
+    bottom: 25.4
+    left: 25.4
+    right: 25.4

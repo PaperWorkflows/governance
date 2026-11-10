@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:paperfactory:paper:1",
+  "title": "Instantiated Paper Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "template",
+    "id",
+    "title",
+    "paper_version",
+    "authors_confirmed",
+    "authors",
+    "language",
+    "bilingual_abstract",
+    "full_english_body",
+    "paper_type",
+    "stage",
+    "stage_state",
+    "manuscript_kind",
+    "rules_version",
+    "applicable_rules",
+    "rule_exemptions",
+    "layout_profile",
+    "citation_profile",
+    "target_venue",
+    "budget",
+    "unresolved",
+    "next_step",
+    "safety",
+    "repository_mode"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "template": { "const": false },
+    "id": {
+      "type": "string",
+      "pattern": "^P[0-9]+$",
+      "description": "Paper ID: P1, P2, ..."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "paper_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "repository_mode": {
+      "const": "per_paper_independent"
+    },
+    "authors_confirmed": { "type": "boolean" },
+    "authors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["author_id", "name", "affiliations", "roles"],
+        "properties": {
+          "author_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Reference key matching authors/registry.yaml"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "affiliations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "enum": ["first", "second", "corresponding", "other"]
+            }
+          },
+          "email": {
+            "anyOf": [
+              { "type": "string", "minLength": 1, "pattern": "\\S" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+    "authors_confirmation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "confirmed_on"],
+          "properties": {
+            "source": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "confirmed_on": { "type": "string", "minLength": 1, "pattern": "\\S" }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "language": { "const": "zh" },
+    "bilingual_abstract": { "const": true },
+    "full_english_body": { "const": false },
+    "paper_type": {
+      "enum": [
+        "theory",
+        "algorithm_experiment",
+        "software_system",
+        "empirical",
+        "mixed"
+      ]
+    },
+    "stage": {
+      "enum": [
+        "intake",
+        "proposal",
+        "research",
+        "writing",
+        "review",
+        "revision",
+        "build",
+        "released",
+        "archived"
+      ]
+    },
+    "stage_state": {
+      "enum": ["active", "paused", "blocked", "completed"]
+    },
+    "manuscript_kind": {
+      "enum": ["research", "submission", "published_archive"]
+    },
+    "rules_version": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "applicable_rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "rule_exemptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rule_id", "reason", "evidence"],
+        "properties": {
+          "rule_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "reason": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "evidence": { "type": "string", "minLength": 1, "pattern": "\\S" }
+        }
+      }
+    },
+    "layout_profile": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "citation_profile": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "pattern": "\\S" },
+        { "type": "null" }
+      ]
+    },
+    "target_venue": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "pattern": "\\S" },
+        { "type": "null" }
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confirmed", "limits"],
+      "properties": {
+        "confirmed": { "type": "boolean" },
+        "limits": {
+          "anyOf": [
+            { "type": "string", "minLength": 1, "pattern": "\\S" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "isolation_profile": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "pattern": "\\S" },
+        { "type": "null" }
+      ]
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      }
+    },
+    "next_step": {
+      "anyOf": [
+        { "type": "string", "minLength": 1, "pattern": "\\S" },
+        { "type": "null" }
+      ]
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hooks", "isolation", "independent_backup", "publishing"],
+      "properties": {
+        "hooks":       { "enum": ["pending", "disabled", "verified"] },
+        "isolation":   { "enum": ["pending", "disabled", "verified"] },
+        "independent_backup": { "enum": ["pending", "disabled", "verified"] },
+        "publishing":  { "enum": ["pending", "disabled", "verified"] }
+      }
+    },
+    "body_target_chars": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 15000
+    },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "slug", "title"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 1 },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "title": { "type": "string", "minLength": 1 }
+        }
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "authors_confirmed": { "const": true } }, "required": ["authors_confirmed"] },
+      "then": {
+        "properties": {
+          "authors": { "minItems": 1 },
+          "authors_confirmation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "confirmed_on"],
+            "properties": {
+              "source": { "type": "string", "minLength": 1, "pattern": "\\S" },
+              "confirmed_on": { "type": "string", "minLength": 1, "pattern": "\\S" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "enum": ["research", "writing", "review", "revision", "build", "released", "archived"]
+          }
+        },
+        "required": ["stage"]
+      },
+      "then": {
+        "properties": {
+          "budget": {
+            "properties": {
+              "confirmed": { "const": true },
+              "limits": { "type": "string", "minLength": 1, "pattern": "\\S" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

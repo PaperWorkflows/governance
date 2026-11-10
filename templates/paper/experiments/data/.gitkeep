@@ -1,0 +1,2 @@
+# Raw data directory. Files are read-only after import.
+# Cleaning produces new files; do not modify files in-place.

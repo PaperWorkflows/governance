@@ -1,0 +1,13 @@
+# Experiment Record
+
+Each experiment run entry:
+- experiment_id
+- date
+- environment_ref (pointer to registered environment)
+- command
+- parameters
+- input_files
+- output_files
+- checksums
+- status: planned | running | completed | failed
+- notes

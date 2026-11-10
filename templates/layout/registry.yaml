@@ -1,0 +1,24 @@
+# Layout Profile Registry（PF-B10 三层版式实现注册表）
+#
+# 三层结构（governance/build.md PF-B3/PF-B10）：
+#   L0 项目草案 profile → L1 venue profile → L2 论文覆盖（templates/paper/build/layout.yaml）。
+#   合并顺序 L0 → L1 → L2，键级覆盖；每个被覆盖键须在构建日志记录 old/new/source-layer。
+#
+# 本注册表登记可用 profile 名到实现文件的映射（file 相对本目录 templates/layout/）。
+# 每个 profile 文件必须通过 schemas/layout-profile.schema.json 校验
+# （additionalProperties: false，未知键构建失败）。语义以 governance/build.md 为准。
+#
+# 结构身份键（profile/kind/target_venue/page/citation/formulas）不可被 paper config 覆盖；
+# typography 为 PF-B3 明示可覆盖键（12pt 正文、1.5 倍行距 overridable），不属于结构身份键。
+#
+# L1 venue profile 扩展约定：目标刊会确认后，在 profiles/ 下新增 <venue-id>.yaml
+# （kind: venue、含 target_venue），并在下方 profiles: 登记同名条目。
+# paper.yaml 的 layout_profile 指向的键必须在本注册表存在，否则构建失败。
+
+schema_version: 1
+profiles:
+  draft:
+    file: profiles/draft.yaml
+    kind: draft
+    layer: L0
+    description: L0 project draft profile

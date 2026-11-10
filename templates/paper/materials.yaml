@@ -1,0 +1,43 @@
+# Materials Registry
+
+Track all research materials (papers, datasets, code, tools) used in this paper.
+
+## Structure
+
+```yaml
+materials:
+  - material_id: MAT-0001
+    type: paper          # paper | dataset | code | tool
+    identifier: "doi:10.1234/example"  # DOI, URL, or unique ID
+    title: "Example Paper Title"
+    relevance: core      # general | core | supporting
+    registered_at: "2025-01-01T00:00:00+00:00"
+    status: registered   # registered | verified | deprecated
+```
+
+## Usage
+
+Add materials via CLI:
+```bash
+python3 -I tools/paper.py materials add \
+  --paper /path/to/paper \
+  --type paper \
+  --identifier "doi:10.1234/example" \
+  --title "Example Paper" \
+  --relevance core
+```
+
+List materials:
+```bash
+python3 -I tools/paper.py materials list --paper /path/to/paper
+```
+
+Check for duplicates:
+```bash
+python3 -I tools/paper.py materials check --paper /path/to/paper
+```
+
+Assess quality via debate:
+```bash
+python3 -I tools/paper.py materials debate --paper /path/to/paper
+```

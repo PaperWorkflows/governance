@@ -1,0 +1,24 @@
+# L0 Project Draft Profile（PF-B3 草案默认档，经 templates/layout/registry.yaml 登记）
+#
+# 结构身份键：本文件的 profile/kind/page 为结构身份键，不可被 paper config（L2）覆盖，
+# 变更须经 profile 版本化（PF-B3）。typography 为 PF-B3 明示可覆盖键
+# （"12pt body, 1.5x line spacing (overridable)"），L1/L2 可按键覆写。
+#
+# 数值依据 governance/build.md PF-B3 默认草案档：A4、25.4mm 四边边距、12pt 正文、1.5 倍行距。
+# 三篇论文（P1/P2/P3）REL 构建即按本档执行（见各论文 build/layout.yaml 与 output/REL-*）。
+
+profile: draft
+kind: draft
+page:
+  size: A4
+  margin:
+    top: 25.4
+    bottom: 25.4
+    left: 25.4
+    right: 25.4
+typography:
+  body_pt: 12
+  line_spacing: 1.5
+  east_asia_font: "Noto Serif SC"
+  # latin_font 可缺省：未指定时由构建工具链回退默认拉丁衬线字体（PF-B3 未固定该值）；
+  # 需要锁定时由上层（L1/L2）显式提供 latin_font 键。

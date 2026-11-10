@@ -1,0 +1,257 @@
+schema_version: 1
+rules_version: 0.1.0
+notice: Structure parseable does not prove rules executed; current tools only check index and file structure.
+
+rules:
+  # ── Principles (AGENTS.md) ─────────────────────────────────────
+  - id: F1
+    file: AGENTS.md
+    title: Scope
+    review_roles: [governance]
+  - id: F2
+    file: AGENTS.md
+    title: Paper Modes
+    review_roles: [governance]
+  - id: F3
+    file: AGENTS.md
+    title: Version Management
+    review_roles: [governance]
+  - id: F4
+    file: AGENTS.md
+    title: Author Library
+    review_roles: [governance]
+  - id: F5
+    file: AGENTS.md
+    title: Dispatch and Governance
+    review_roles: [governance]
+  - id: F6
+    file: AGENTS.md
+    title: Evidence and References
+    review_roles: [governance]
+  - id: F7
+    file: AGENTS.md
+    title: Safety and Constraints
+    review_roles: [governance]
+  - id: F8
+    file: AGENTS.md
+    title: Rule Index
+    review_roles: [governance]
+  - id: F9
+    file: AGENTS.md
+    title: Governance Change Discipline
+    review_roles: [governance]
+
+  # ── Mode-specific rules ────────────────────────────────────────
+  - id: PF-P1
+    file: governance/proposal.md
+    title: Material Registration
+    review_roles: [governance]
+  - id: PF-P2
+    file: governance/proposal.md
+    title: Novelty Search
+    review_roles: [governance]
+  - id: PF-P3
+    file: governance/proposal.md
+    title: Topic and Independence Assessment
+    review_roles: [governance]
+  - id: PF-P4
+    file: governance/proposal.md
+    title: Topic Split Boundaries
+    review_roles: [governance]
+  - id: PF-P5
+    file: governance/proposal.md
+    title: Paper Config Draft
+    review_roles: [governance]
+  - id: PF-P6
+    file: governance/proposal.md
+    title: Outline Design
+    review_roles: [governance]
+  - id: PF-P7
+    file: governance/proposal.md
+    title: Research Plan
+    review_roles: [governance]
+  - id: PF-P8
+    file: governance/proposal.md
+    title: Proposal Deliverables
+    review_roles: [governance]
+
+  - id: PF-R1
+    file: governance/research.md
+    title: Research Authorization
+    review_roles: [governance]
+  - id: PF-R2
+    file: governance/research.md
+    title: Experiment Design
+    review_roles: [governance]
+  - id: PF-R3
+    file: governance/research.md
+    title: Baseline Setup
+    review_roles: [governance]
+  - id: PF-R4
+    file: governance/research.md
+    title: Statistics and Reporting
+    review_roles: [governance]
+  - id: PF-R5
+    file: governance/research.md
+    title: Data Source Declaration
+    review_roles: [governance]
+  - id: PF-R6
+    file: governance/research.md
+    title: Code and Reproducibility
+    review_roles: [governance]
+  - id: PF-R7
+    file: governance/research.md
+    title: Experiment Records
+    review_roles: [governance]
+  - id: PF-R8
+    file: governance/research.md
+    title: Environment and Isolation
+    review_roles: [governance]
+
+  - id: PF-W1
+    file: governance/writing.md
+    title: Authenticity
+    review_roles: [R-A, R-B, R-C]
+  - id: PF-W2
+    file: governance/writing.md
+    title: Chinese Body and Bilingual Abstract
+    review_roles: [R-A, R-B, R-C]
+  - id: PF-W3
+    file: governance/writing.md
+    title: Independent Contribution and Novelty
+    review_roles: [R-A, R-B, R-C]
+  - id: PF-W4
+    file: governance/writing.md
+    title: Theory, Algorithm, and System Methods
+    review_roles: [R-B]
+  - id: PF-W5
+    file: governance/writing.md
+    title: Experiment, Statistics, and Comparison
+    review_roles: [R-B]
+  - id: PF-W6
+    file: governance/writing.md
+    title: Literature Search and Citation Verification
+    review_roles: [R-C]
+  - id: PF-W7
+    file: governance/writing.md
+    title: Privacy, License, and Technical Conditions
+    review_roles: [R-C]
+  - id: PF-W8
+    file: governance/writing.md
+    title: Figures, Tables, Formulas, and Terminology
+    review_roles: [R-B, R-D]
+  - id: PF-W9
+    file: governance/writing.md
+    title: Self-Sufficiency, Pragmatism, and Reader Understanding
+    review_roles: [R-C]
+  - id: PF-W10
+    file: governance/writing.md
+    title: Claim-Evidence Correspondence and Limitations
+    review_roles: [R-A, R-B]
+
+  - id: PF-B1
+    file: governance/build.md
+    title: Manuscript Kind
+    review_roles: [R-D]
+  - id: PF-B2
+    file: governance/build.md
+    title: Single Source Body
+    review_roles: [R-D]
+  - id: PF-B3
+    file: governance/build.md
+    title: Layout Configuration
+    review_roles: [R-D]
+  - id: PF-B4
+    file: governance/build.md
+    title: Fixed Input Snapshot
+    review_roles: [governance]
+  - id: PF-B5
+    file: governance/build.md
+    title: Staged Build
+    review_roles: [R-D]
+  - id: PF-B6
+    file: governance/build.md
+    title: Figure and Table Acceptance
+    review_roles: [R-D]
+  - id: PF-B7
+    file: governance/build.md
+    title: Version Release
+    review_roles: [governance]
+  - id: PF-B8
+    file: governance/build.md
+    title: Local Delivery
+    review_roles: [governance]
+  - id: PF-B9
+    file: governance/build.md
+    title: Render Directive Filtering
+    review_roles: [R-D]
+  - id: PF-B10
+    file: governance/build.md
+    title: Layout Profile Layering
+    review_roles: [R-D]
+
+  - id: PF-RV1
+    file: governance/review.md
+    title: Effective Rules and Review Boundaries
+    review_roles: [governance, independent_reviewer]
+  - id: PF-RV2
+    file: governance/review.md
+    title: Four-Perspective Independent Review
+    review_roles: [governance, independent_reviewer]
+  - id: PF-RV3
+    file: governance/review.md
+    title: Writer-Reviewer Separation
+    review_roles: [governance, independent_reviewer]
+  - id: PF-RV4
+    file: governance/review.md
+    title: Issue Grading
+    review_roles: [governance, independent_reviewer]
+  - id: PF-RV5
+    file: governance/review.md
+    title: Dispute Resolution
+    review_roles: [governance, independent_reviewer]
+  - id: PF-RV6
+    file: governance/review.md
+    title: Fix Closure
+    review_roles: [governance, independent_reviewer]
+
+  - id: PF-V1
+    file: governance/versions.md
+    title: Rule Traceability
+    review_roles: [governance]
+  - id: PF-V2
+    file: governance/versions.md
+    title: Independent Version Number
+    review_roles: [governance]
+  - id: PF-V3
+    file: governance/versions.md
+    title: Version Change Record
+    review_roles: [governance]
+  - id: PF-V4
+    file: governance/versions.md
+    title: Multi-Repository Structure
+    review_roles: [governance]
+  - id: PF-V5
+    file: governance/versions.md
+    title: Commit Scope
+    review_roles: [governance]
+  - id: PF-V6
+    file: governance/versions.md
+    title: Changelog
+    review_roles: [governance]
+  - id: PF-V7
+    file: governance/versions.md
+    title: Temp Directory
+    review_roles: [governance]
+  - id: PF-V8
+    file: governance/versions.md
+    title: Pre-checks
+    review_roles: [governance]
+  - id: PF-V9
+    file: governance/versions.md
+    title: Skeleton Members
+    review_roles: [governance]
+  - id: PF-V10
+    file: governance/versions.md
+    title: Paper Repository Independence
+    review_roles: [governance]

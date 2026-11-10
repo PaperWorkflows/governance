@@ -1,0 +1,21 @@
+# Per-Paper Author Registry
+
+Each paper maintains its own author registry here.
+Since paper repos are private, full author details (name, affiliation, email, postal code) can be stored.
+
+Format: list of author entries.
+
+- id: unique identifier (e.g. author_a)
+  name: Full name in native script
+  name_en: Name in English / romanized
+  affiliations:
+    - Institution name
+    - Department (optional)
+  email: Email address (optional, can be null for privacy)
+  orcid: ORCID identifier (optional)
+  postal_code: Postal code (optional, private repo only)
+  roles:
+    - first          # first author
+    # - second       # uncomment if needed
+    # - corresponding # uncomment if needed
+    # - other        # uncomment if needed

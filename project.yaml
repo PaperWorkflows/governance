@@ -1,0 +1,98 @@
+schema_version: 1
+project_id: paperfactory
+rules_version: 0.1.0
+stage: foundation
+language: zh
+
+# Paper repository mode: each paper is an independent git repo with its own GitHub remote
+repository_mode: per_paper_independent
+
+# Paper directory pattern under papers/
+paper_directory_pattern: '^papers/P[0-9]+-[A-Z]+-[0-9]{8}$'
+
+# Default body target chars
+default_body_target_chars: 15000
+
+# Paper modes
+modes:
+  - id: proposal
+    name: Proposal Mode
+    description: Organize paper materials, assess feasibility, finalize outline and research plan
+    status: implemented
+  - id: research
+    name: Research Mode
+    description: Web search, code writing, data processing and analysis # verified via P1/P2/P3 pipeline 2026-11-11
+    status: implemented
+  - id: writing
+    name: Writing Mode
+    description: Auto-generate paper body from outline and research data # verified via P1/P2/P3 pipeline 2026-11-11
+    status: implemented
+  - id: build
+    name: Build Mode
+    format:
+      - docx
+      - pdf
+    description: Typeset and produce docx and PDF
+    status: implemented
+  - id: review
+    name: Review Mode
+    description: "Automated review: style, wording, academic standards"
+    status: implemented
+
+# Orchestration
+orchestration:
+  paper_work: subagents_only
+  main_session: coordination_and_governance_only
+  preferred_executors: [general-glm, general-minimax]
+  fallback: default_subagent
+  unavailable: wait_and_report
+
+# GitHub org and identity
+github:
+  org: PaperWorkflows
+  governance_repo: instruction
+  paper_repo_pattern: 'P{N}-{AUTHOR_EN}-{YYYYMMDD}'
+
+git_identity:
+  name: janssenkm
+  email: janssenkm@users.noreply.github.com
+
+# Safety
+safety:
+  mode: cooperative_checks_only
+  destructive_operations_enabled: false
+  enforced_isolation: not_implemented
+  tool_hooks: not_implemented
+
+# Capabilities
+capabilities:
+  proposal: implemented
+  scaffold: implemented
+  check: implemented
+  schema_validation: implemented
+  materials: implemented
+  experiments: implemented
+  writing: implemented
+  review: implemented
+  build_docx: implemented
+  build_pdf: implemented
+  version_bump: implemented
+  preflight: not_implemented
+  commit_scope_check: not_implemented
+  monthly_cleanup: not_implemented
+
+# Temp policy
+temp_policy:
+  root: temp
+  directory_pattern: '^P[0-9]+$'
+  timezone: Asia/Shanghai
+  cleanup_cadence: calendar_month
+  trigger: before_every_task
+  completion_record: governance/maintenance/monthly-cleanup.yaml
+  deletion_runner: not_implemented
+
+# Open decisions
+open_decisions:
+  pilot_paper: null
+  template_venue_profiles: null
+  citation_style_implementation: null

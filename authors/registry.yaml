@@ -1,0 +1,9 @@
+- id: author_a
+  name: 作者A
+  name_en: Author A
+  affiliations:
+  - 云南省自然资源厅<单位已脱敏>
+  email: <邮箱已脱敏>
+  orcid: null
+  git_name: janssenkm
+  git_email: janssenkm@users.noreply.github.com
