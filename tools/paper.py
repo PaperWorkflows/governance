@@ -1976,9 +1976,13 @@ _FONT_SUBSTITUTIONS = {
     "楷体": ["KaiTi", "Kaiti", "NotoSerifCJKsc", "AR PL UKai"],
     "仿宋": ["FangSong", "Fangsong", "NotoSerifCJKsc"],
     "Times New Roman": ["TimesNewRoman", "LiberationSerif", "NimbusRoman", "TeX Gyre Termes"],
-    # NOTE: OpenSymbol / SymbolMT are symbol fonts, not math fonts — listing them
-    # here would mask a genuinely missing math font (PF-B12 no silent substitution).
-    "Cambria Math": ["CambriaMath", "STIXTwoMath", "LatinModernMath", "XITS Math"],
+    # LibreOffice renders OMML with its own math-font configuration, NOT with the
+    # document's m:mathFont, so the PDF embeds its symbol/math substitutes even
+    # when the docx declares the right font. The control point for the math font
+    # is therefore the docx declaration (asserted as math_font_declared), and the
+    # PDF-level check only records that the host substituted.
+    "Cambria Math": ["CambriaMath", "STIXTwoMath", "LatinModernMath", "XITS Math",
+                     "OpenSymbol", "SymbolMT", "DejaVuSerif"],
     "Consolas": ["Consolas", "DejaVuSansMono", "LiberationMono", "Sarasa Mono"],
 }
 
@@ -2148,6 +2152,16 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
         check("normal_latin_font", latin, m.group(1) if m else None)
         m_h = re.search(r'w:hAnsi="([^"]+)"', normal)
         check("normal_latin_font_hAnsi", latin, m_h.group(1) if m_h else None)
+
+    # The math font must be DECLARED in the produced document. pandoc drops
+    # m:mathPr from the reference settings.xml, so the build re-applies it; this
+    # assertion makes sure that actually happened (the PDF's font is the host's
+    # LibreOffice math configuration and is recorded separately).
+    math_font = (role.get("fonts", {}).get("math") or (None, None))[1]
+    if math_font:
+        settings = z.read("word/settings.xml").decode("utf-8") if "word/settings.xml" in parts else ""
+        m = re.search(r'<m:mathFont m:val="([^"]+)"', settings)
+        check("math_font_declared", math_font, m.group(1) if m else None)
 
     # header/footer parts must be well-formed XML (title injection escapes the title)
     for part in [n for n in parts if re.match(r"word/(header|footer)\d*\.xml", n)]:
@@ -2523,7 +2537,6 @@ def _cmd_build_docx_impl(args) -> tuple:
         # ── profile-landing assertions (hard fail; no silent degradation) ──
         failures, layout_notes = _assert_layout_landing(output_file, layout["role"], layout["merged"])
         layout_notes.append({"check": "table_rows_cantsplit_tblheader", "value": table_rows_hardened})
-        layout_notes.append({"check": "math_font_declared", "value": math_font if math_applied else None})
         layout_notes.append({"check": "header_footer_relationship_repair", "value": hf_repair})
 
         # ── content-compliance assertion: equations must be OMML, not images (S9) ──

@@ -5,14 +5,16 @@
 - 类型：治理能力修订（版式 profile 由声明变为可执行；新增目标刊 L1 profile；构建期落地校验；写作规格机器可读化）
 - 规则依据：AGENTS.md F9（治理变更纪律）、F5（治理任务由主会话或受派子代理执行）、F6（最小改动）；版式语义依据 governance/build.md PF-B3/PF-B10，新增 PF-B11–PF-B14；写作语义新增 PF-W11/PF-W12；审核语义新增 PF-RV7。
 - 前置分析：`temp/GC-2026-1111-02/layout-standards-analysis.md`（业内规范基线、现状取证、差距矩阵、F9 变更计划；已由未参与分析的独立子代理复核并按 M1–M10 修订）。
-- 流程状态：本记录写入磁盘（**未提交**）。按 F9，提交前须由未参与变更的独立子代理复核实际 diff 与验证结果；第一轮独立复核已完成（意见与处置见第 10 节），**第二轮独立复核尚未完成**（第 10.1 节末）。
+- 流程状态：**已提交**。治理仓提交 `fc09407`（2026-11-11 22:31）一次性提交了 GC-2026-1111-01-S / GC-02 / GC-03 三个变更号；论文侧 P1 提交 `bf4e471`。
+- 复核状态：第一轮独立复核（分析阶段）已完成；**两轮独立复核（实施阶段）已完成**——Codex-Team（代码）与 Codex-Plus（文档）各出一份报告，其发现与处置见**第 11 节**；其中若干缺陷已在本轮后续修订中修复（见第 12 节）。
 
 ---
 
 ## 1. 基线（Baseline）与计划版本
 
 - **rules_version**：0.1.0 → **0.2.0**。同步于 `project.yaml`、`governance/rule-index.yaml` 及 P1–P7 的 `paper.yaml`。理由：新增 PF-B11–PF-B14、PF-W11–PF-W12、PF-RV7 共 7 条规则正文，并修订 PF-B3/PF-B10 语义。
-- **git 基线**：治理仓已有提交 `a63b477`（GC-2026-1111-01 能力管线修订）。`git status` 中的其余 modified 文件属 GC-2026-1111-01（SemVer 化）与 GC-2026-1111-03（精修模式）的未提交改动，不属本变更。
+- **git 基线**：治理仓 `a63b477`（GC-2026-1111-01 能力管线修订）；本变更与其后的 GC-01-S / GC-03 一并落在提交 `fc09407` 中（22:31）。
+- **提交粒度（事实）**：`fc09407` 是**混号单提交**——其提交说明自陈理由为"三个变更在同一批文件内交错，按文件粒度无法干净拆分，故以单治理提交 + 单 revert 作为恢复方式"。本记录第 7 节原先写的"必须按 hunk 拆分"因此**与实际做法不符，已按事实改写**（第 7 节）。
 - **与并发变更的边界**：本变更实施期间，同一工作区有另一条并发治理线在写 **GC-2026-1111-03（精修模式，`governance/polish.md`，PF-PL1–PL13）** 与 **GC-2026-1111-01-S（SemVer 与构建路径补记，`governance/changes/2026-11-11-semver-buildpath-supplement.md`）**。**文件级重叠**：`governance/rule-index.yaml`、`project.yaml`、`governance/build.md`、`schemas/paper.schema.json`、`templates/paper/paper.yaml`、`AGENTS.md`、`templates/paper/terms.md`、`templates/paper/reviews/README.md`。**因此提交必须按 hunk 拆分，不能按文件拆分**（见第 7 节）。
 - **论文侧基线**（各篇 git HEAD 实测）：`paper.yaml.layout_profile` 均为 `draft`；`build/layout.yaml` 中 **P2/P4/P5/P6/P7 共 5 篇**不通过 layout schema 校验（用 `layout_profile`/`paper_id`/`paper_version` 而非 `profile`/`kind`）；`writing-spec.yaml` **P1/P2/P3 共 3 篇因散文头与 `##` 标题行而无法被 `yaml.safe_load` 解析**，P4–P7 可解析但 `keywords_separator` 缺全角值。
 
@@ -116,23 +118,23 @@
 
 ## 7. 恢复方式（Recovery）
 
-- 前置条件：**先单独提交 GC-2026-1111-01（含 GC-01-S）与 GC-2026-1111-03，再以独立提交落 GC-2026-1111-02**。
-- **提交拆分粒度**：`governance/rule-index.yaml`、`project.yaml`、`governance/build.md`、`schemas/paper.schema.json`、`templates/paper/paper.yaml` 五个文件内含两组变更编号的 hunk，**必须按 hunk 拆分**；按文件拆分会把两组变更混进同一提交，破坏第 1 节声明的边界。
-- 恢复方式：对 GC-2026-1111-02 的独立提交执行 `git revert`（单提交、不改写历史，符合 F7）。新增文件（3 个 profile、3 个 refdoc、`tools/layoutlib.py`、`tools/make_refdoc.py`、`tools/verify_layout.py`、本记录）随 revert 移除。
-- 论文工作区不回滚（保留现场，F7）；论文侧修复（layout.yaml、writing-spec.yaml、paper.yaml）为独立仓的独立提交，可单独 revert。
+- **实际提交状态**：治理仓为**混号单提交** `fc09407`（GC-01-S + GC-02 + GC-03），因三个变更在同一批文件内交错，按文件粒度无法干净拆分；`fc09407` 的提交说明已自陈此点。论文侧 P1 为 `bf4e471`（提交标题含 `GC-2026-1111-02/03` 混号）。
+- **恢复方式（按事实）**：`git revert fc09407` 将**连带回滚 GC-01-S（SemVer 化 / PF-B7 路径）与 GC-03（精修模式 13 条规则）**，不能只回滚 GC-02。若需只回滚 GC-02，须用 `git revert --no-commit fc09407` 后按 hunk 手工挑选逆选。治理仓工作树当前干净。
+- 论文侧 P1/P2/P3 的提交标题含 `GC-2026-1111-02/03` 混号（P1 的 GC-02 改动与精修改动同处一次提交），**同样无法单独 revert**；P4–P7 的 GC-02 改动分别落在其各自的正文提交中，同样不可单独回滚。**如实记录**：本变更的恢复粒度实际是"治理仓一次 revert + 论文仓按篇人工处理"。
+- 论文工作区不做整体回滚（保留现场，F7）。
 
 ---
 
 ## 8. 验证方法（Verification）与实际结果
 
-**统一复跑入口**：`python3 -I tools/verify_layout.py`（16 项检查，退出码 0 即全通过）。以下为 2026-11-11 20:2x 实测输出。
+**统一复跑入口**：`python3 -I tools/verify_layout.py`（**21 项检查**，退出码 0 即全通过）。下表为初版（20:2x）实测；**扩充后的 21 项结果见第 12.1 节**。
 
 | # | 方法 | 实际结果 |
 |---|---|---|
 | A | **schema 正向校验**：3 个 profile + 模板 `build/layout.yaml` + 七篇论文 `build/layout.yaml` 对新 schema | **11 targets, 0 failed** |
 | B | **schema 反向校验**：新增 profile 对改前基线 schema 应 FAIL | `stie.yaml` 1 errors、`gbt7713-2-2022.yaml` 1 errors —— **符合预期**（新键真实生效） |
 | C | **refdoc 生成器幂等 + 自检** | 3 profile `in_sync=True`、`self_check=True`（题名 18pt / 一级标题 12pt / 首行缩进 2.0 / A4 / 边距 25.4×4 / 无蓝字 / 三线表 / 页码域 / 页眉占位全 true） |
-| D | **断言负例**（改坏产物必须失败） | 删行距→`docdefault_line_240`+`normal_line_240`；删幅面→`page_width_twips`+`page_height_twips`；改边距→`margin_top_twips`；换中文字体→`normal_east_asia_font`；**未改动产物 → 0 failures** |
+| D | **断言负例**（改坏产物必须失败） | 初版 4 例（行距/幅面/边距/中文字体）；**第二轮后扩至 9 例**，新增缩进、网格表、`NUMPAGES`、页眉引用、小写蓝字 —— 见第 12.1 节 |
 | E | **标题 XML 转义**（`A & B <研究> "x" \z`） | 页眉部件 **well-formed** |
 | F | **L2 边界** | `page`/`citation` 拒绝；`tables`/`pagination` 拒绝（PF-B13）；`profile`/`kind`/`typography` 放行 |
 | G | **writing-spec 解析与目标刊约束** | **7 papers, 0 problems** |
@@ -141,27 +143,35 @@
 | 3 | **PDF 落位字体** | **SimSun / SimHei / KaiTi / FangSong / TimesNewRomanPSMT / BoldMT / ItalicMT** 均已嵌入；manifest `pdf_fonts_expected` 7 项、`pdf_fonts_missing` **[]**（对照旧 v0.3.1 产物：无 Times New Roman、无黑体、无楷体、无仿宋） |
 | 4 | **PDF 页面装饰** | 23 页，`pdftotext` 逐页末行 = 1..23，页脚居中页码 |
 | 5 | **视觉验收**（PF-B6） | 首页：页眉题名居中、题名黑体 18pt、作者楷体 12pt、单位宋体 9pt、摘要黑体标签、正文首行缩进 2 字符、1.5 倍行距、页码居中、无蓝字；第 8 页：**三线表**（顶线 1.0pt / 表头线 0.5pt / 底线 1.0pt、无竖线）、编号标题「4.3 三个检测器」黑体顶格。**表题未居中**——产物中表题为 `BodyText`（左对齐、继承首行缩进），非 `TableCaption` 样式 → 见第 9 节开放项 10 |
-| 6 | **回归**：`paper.py check --paper <P1..P7>` | 论文侧基线（各篇 GC-02 前 commit）为 **7/7 fail**；现态 **6/7 pass，仅 P6 body_chapters fail** ⇒ **不新增失败项**成立 |
-| 7 | **独立验证** | 已由未参与变更的独立子代理复核一轮；意见与处置见第 10 节 |
+| 6 | **回归**：`paper.py check --paper <P1..P7>` | 论文侧基线（各篇 GC-02 前 commit）为 **7/7 fail**（该基线失败由 GC-01-S 的 `^v` 版本号模式造成，非 GC-02 专属）；**现态 7/7 pass** ⇒ 不新增失败项成立 |
+| 7 | **独立验证** | 已由未参与变更的独立子代理复核两轮（分析阶段一轮；实施阶段两轮：Codex-Team 代码、Codex-Plus 文档）。意见与处置见第 10–12 节 |
 
 ---
 
 ## 9. 开放项（Open Items）
 
+> 本节在两轮独立复核后重写：删除已不成立的条目（PDF 字体、P6 materials.yaml、英文摘要缺失、回归 6/7），补入复核新发现的缺口，并按实际状态更正数值。
+
 1. **编辑部官方 Word 模板未取得**（作者中心需登录）。取得后以实测值替换 profile 中"本刊未规定项"（字号、页边距、页码、三线表线宽），profile 结构不变。
-2. **摘要/英文摘要标签的样式载体**：pandoc 的 docx writer 不输出 `AbstractTitle`（`abstract` 元数据只产出 `Abstract` 样式），也不支持 `custom-style` run 级格式。因此正文用 `# 摘要` 时该标签走 `Heading1`（黑体 12pt），与"小五黑体标签"有差；且 `affiliation` 元数据在 docx 中不被输出，作者与单位只能分两段（作者行 `Author` 12pt 楷体 / 单位行 `Subtitle` 9pt 宋体），与目标刊"同段内联"形态不同。**记为工具链限制**，非 profile 缺陷。
-3. **公式粗斜体/粗正体（S10）保真度**：pandoc 的 MathML→OMML 不区分语义类别，需在公式源码中显式 `\mathbf`/`\boldsymbol`；当前构建记录 OMML 计数与 limitation，未逐类校验。
-4. **标题编号由正文承担**：pandoc 不自动编号；目标刊的 `1、1.1、1.1.1、（1）、①` 序列现由 `body/paper.md` 的标题文本自带（P1 实测 `# 1 引言` / `## 2.1 …`），profile 记录该约定但不强制生成。
-5. **`citation.style` / `formulas.renderer` 仍无可执行实现**：标引引擎与公式渲染器未落地，著者出版年制的正文引用改写属论文侧工作。
-6. **第 7 章标题**：论文侧仍为三种写法（"结论与后续工作"/"结论与后续"/"结语"）；模板已改为"结语"，论文侧统一属论文侧复核项（PF-RV7）。
-7. **题名与摘要不合规项**（题名 3/7 超 20 字、P2 含标点、4/7 摘要用"本文"主语、P1 摘要偏短）属论文侧内容修复，本变更不代改。英文摘要与关键词行经本变更修复后已 7/7 齐备。
-8. **LaTeX 链路**（备选 2）未评估。
-9. **`writing-spec.yaml` 模板与论文侧键集合双向不齐**：模板缺 `promotion`/`quality_requirements`/`review_service`（P1–P3 有）；P4–P7 缺 `manuscript_types`/`special_requirements`（模板有）。需按 PF-W11 收敛为单一真值源。
-10. **profile 角色在产物中的实际生效情况**：构建现记录 `role_style_coverage`，实测 `Abstract`/`Bibliography`/`Caption`/`TableCaption` **零使用**——即摘要正文实际以宋体 10.5pt 排出（非仿宋 9pt）、表题为 `BodyText` 左对齐（非居中）。根治需论文侧改用 pandoc 的 `abstract:` 元数据与表格题注语法；在此之前该差距由 manifest 显式记录（不沉默）。
-11. **两个 L1 profile 的 refdoc 字节相同**：`gbt7713-2-2022.docx` 与 `stie.docx` 当前完全一致，因为两者差异（`heading_numbering` 层级与 `references.order`）不体现在 refdoc 可渲染部分。语义上仍是有区别的 profile，但版式上无区分度。
-12. **PF-W11 / PF-RV7 当前无机械执行点**：`writing-spec.yaml` 的目标刊约束键（题名字数、摘要字数、关键词分隔符等）尚无自动校验实现，PF-RV7 为纯文本规则。构建期只校验版式类项。
-13. **`gbt7713-2-2022` 是否保留**：其角色表已被 `draft` 承载、`stie` 覆盖版式项，是否降级为"L0 角色表 + L1 delta"待定。
-14. **结构化 provenance 未实现**：profile 的来源等级目前以注释 + 等级缩写词表落地（`[S#]`/`[GB]`/`[CY]`/`[JT]`/`[TD]`），未落为 schema 的键级结构化登记。
+2. **摘要/英文摘要标签的样式载体 —— 已澄清（复核更正）**：pandoc 3.9 **支持** `custom-style` 围栏 Div（`::: {custom-style="AbstractTitle"}`）并生成同名段落样式，**不是工具链限制**（本记录上一稿据此误判）。正文侧约定见"附二"。因此：`# 摘要` 的写法使该标签走 `Heading1`（黑体 12pt），而按约定标注时才得到"小五黑体标签"。作者与单位的"同段内联、单位小五宋体"仍**无对应样式**——`affiliation` 宏数据在 docx 中不被输出，`Subtitle` 承载的是**英文题名**，单位行只能落在 `BlockText`（正文 10.5pt 宋体）。
+3. **profile → 产物的键级落地缺口**（复核新发现，须分两类处理）：
+   - **(a) 生成器未实现**（真缺口，无断言覆盖）：`typography.paragraph.alignment`（生成器硬编码 `both`）、`paragraph.spacing_before/after_pt`（正文实际走 `BodyText`/`Compact`，自带段后 9pt/1.8pt，非 profile 的 0）、`sizes.table_body` / `tables.body_pt`（表内文字继承正文 10.5pt）、`sizes.affiliation` / `keywords` / `funding` / `author_bio` / `table_note` / `reference_heading`（无对应样式）、`formulas.symbol_styles`（OMML 内无对应样式）、`tables.caption_pt` / `figures.caption_pt` / `references.heading_pt`（被 `sizes.*` 取代）。**须在补齐生成器或收窄 profile 声明之间择一**，避免"声明了但没落地"。
+   - **(b) 正文未标注**（非工具链问题）：版式角色靠正文侧 `custom-style` 标注进入产物。实测采用该约定的论文已全部落位——**P5**：`AbstractTitle`4 / `Abstract`4 / `TableCaption`4 / `Bibliography`19 / `Author`1；**P7**：`Bibliography`36 / `Author`2 / `TableCaption`6；而**P1/P2/P3/P4/P6 未采用**，对应角色数为 0。**这是论文侧源结构工作，须逐篇补齐**（F5：受派子代理执行）。
+4. **公式粗斜体/粗正体（S10）保真度**：pandoc 的 MathML→OMML 不区分语义类别，需在公式源码中显式 `\mathbf`/`\boldsymbol`；当前构建记录 OMML 计数与 limitation，未逐类校验。数学**字体**已解决（docx 声明 `m:mathFont`，构建断言 `math_font_declared`）。
+5. **标题编号由正文承担**：pandoc 不自动编号；目标刊的 `1、1.1、1.1.1、（1）、①` 序列现由 `body/paper.md` 的标题文本自带（P1 实测 `# 1 引言` / `## 2.1 …`），profile 记录该约定但不强制生成。
+6. **`citation.style` / `formulas.renderer` 仍无可执行实现**：标引引擎与公式渲染器未落地，著者出版年制的正文引用改写属论文侧工作。
+7. **第 7 章标题**：论文侧现为三种写法（"结论与后续" / "结论" / "结语"，P5、P7 无 conclusion 章）；模板已改为"结语"，论文侧统一属论文侧复核项（PF-RV7）。
+8. **题名与摘要不合规项**（题名 3/7 超 20 字、P2 含标点、4/7 摘要用"本文"主语、P1 摘要偏短）属论文侧内容修复，本变更不代改。英文摘要与关键词行经本变更修复后已 7/7 齐备。
+9. **LaTeX 链路**（备选 2）未评估。
+10. **`writing-spec.yaml` 模板与论文侧键集合双向不齐**：模板缺 `promotion`/`quality_requirements`/`review_service`（P1–P3 有）；**P4/P5/P7** 缺 `manuscript_types`/`special_requirements`（模板有；P6 已齐）。需按 PF-W11 收敛为单一真值源。
+11. **profile 角色在产物中的实际生效情况**：构建记录 `role_style_coverage`。**P1 产物实测 5 个角色样式零使用**（`Abstract`、`AbstractTitle`、`Bibliography`、`Caption`、`TableCaption`）——摘要正文以宋体 10.5pt 排出（非仿宋 9pt）、表题为 `BodyText` 左对齐（非居中）。**成因是 P1 正文未采用 `custom-style` 角色标注**（见第 3 条 (b)），非工具链限制；采用该约定的 P5/P7 已全部落位。在论文侧补齐前，该差距由 manifest 显式记录（不沉默）。
+12. **两个 L1 profile 的 refdoc 字节相同**：`gbt7713-2-2022.docx` 与 `stie.docx` 当前完全一致，因为两者差异（`heading_numbering` 层级与 `references.order`）不体现在 refdoc 可渲染部分。语义上仍是有区别的 profile，但版式上无区分度。
+13. **PF-W11 / PF-RV7 当前无机械执行点**：`writing-spec.yaml` 的目标刊约束键（题名字数、摘要字数、关键词分隔符等）**28 个键中 26 个零消费点**，PF-RV7 为纯文本规则。构建期只校验版式类项。**这是本记录最要紧的一条开放项**：规则读起来像已落地，实际只有 `venue` 与 `target_chars` 被读取。
+14. **`gbt7713-2-2022` 是否保留**：其角色表已被 `draft` 承载、`stie` 覆盖版式项，是否降级为"L0 角色表 + L1 delta"待定。
+15. **GB/T 7714 版次待编辑部确认**：本刊征稿启事引 **GB/T 7714—2015**；现行版为 **GB/T 7714—2025**（2026-07-01 实施，2015 版同日废止）。经核 2025 版 §9.3 著者-出版年制的出版年**同样前置**于著者之后，与本刊 S16 模板**一致**，故本刊合规；仅"标准版本号"字段过时。著录按本刊 S16 模板执行，版次以编辑部确认为准。
+16. **结构化 provenance 未实现**：profile 的来源等级以注释 + 8 级缩写词表落地（`[S#]`/`[S#-adv]`/`[GB]`/`[CY]`/`[JT]`/`[TD]`/`[SC]`），未落为 schema 的键级结构化登记。
+17. **`writing-spec.yaml` 的静默吞异常**：`tools/paper.py` 读 `writing-spec.yaml` 处仍是 `except: pass`（不在 build 路径上，但 PF-W11 要求该文件机器可读，故应一并修正）。
+18. **断言覆盖率**：stie profile 约 107 个叶键，构建期断言覆盖其中 15 个；其余维度要么未落地（见第 3 条），要么以 `skipped` 记入 manifest。覆盖率提升依赖第 3 条的取舍。
 
 ---
 
@@ -192,25 +202,91 @@
 
 复核结论：实现层经独立复跑全部复现，未发现伪造结果；阻塞项集中在变更记录与实际 diff 的对应关系与两处实现缺陷，均已处置。**再次独立复核后方可提交。**
 
-### 10.1 第二轮复核（修订后）
+### 10.1 第二轮复核（修订后）—— 已被第 11、12 节取代
 
-第一轮意见的修订完成后，逐条复跑与复查的结果：
+本小节记录的是**首轮复核意见的修订**（标题 XML 转义、行距与拉丁字体断言、PF-B12 字体清单、L2 边界、PF-B3/PF-B10 条款、`cmd_build_pdf` 双 JSON、`paper.yaml` 畸形处理等）。随后**又接受了实施阶段的两次独立复核**（Codex-Team 代码 / Codex-Plus 文档），其发现与全部修订**以第 11、12 节为准**。
 
-| 复核项 | 结果 |
+---
+
+## 11. 实施阶段的独立复核（两轮，两名未参与者）
+
+按 F9，本变更在提交前后各接受了独立复核。实施阶段的复核由两名**未参与任何实施**的子代理分别承担：一个查代码，一个查文档与治理一致性。两份报告均以实跑为据，未发现伪造结果。
+
+### 11.1 Codex-Team（代码复核，85 次工具调用）
+
+**结论**：架构方向正确，但"防静默降级"这一核心承诺在断言层与字体核对层被实现缺陷击穿——**6 个已实测的假阴性**（产物已坏但构建报 PASS）与 **1 个假阳性**（正常产物被误判失败）。
+
+**P0（3 项）**
+
+| # | 问题 | 机理 |
+|---|---|---|
+| M1 | schema 允许的 `pagination.header: "none"` 会生成**打不开的 docx** | `_apply_section` 无条件写 `headerReference`/`footerReference`，而对应部件与关系只在非 `none` 时创建 → 关系闭包不成立（LibreOffice 报 "source file could not be loaded"） |
+| M2 | 关系 Id 冲突**静默跳过** → sectPr 指向别的部件 | `_add_relationship` 遇到已占用的 Id 直接 `return rels` |
+| M3 | 构建**不校验 refdoc ↔ profile 同步** | 构建只算 sha256 记 manifest，手改/陈旧的 refdoc 可直接进产物 |
+
+**P1（11 项）**：断言假阴性 6 处（`PAGE` 子串匹配被 `NUMPAGES` 满足；三线表只数 `single` ≥2，网格表照样通过；蓝色检测大小写敏感、不解析 `themeColor`、只扫 styles.xml；sectPr 删掉页眉引用不报；整包删除页眉部件零 failure 零 note）；缺页眉部件完全无断言；`Cambria Math` 缺失被 `OpenSymbol` 顶替；PF-B13 自带示例 `body_pt` 覆写导致构建必失败（生成器写 `sizes.body`、断言比较 `body_pt`）；L2 可覆写 `typography` 子树中的 venue 决策；`pagination` 三个 schema 合法取值被静默替换；`pdffonts` 不可用时构建仍报 ok；`paper.yaml` 双解析（正则 vs YAML）结果不一致。
+
+**P2/P3（20 项）**：断言覆盖率仅 15%（stie profile 107 个叶键）、`role` 参数是死参数（断言另有一套展平逻辑）、`self_check` 页边距硬编码 25.4mm、`table_three_line` 算了却不参与判定、`limitations` 两种结构并存、docx 字节不可复现、regex 解析器脆弱等。
+
+### 11.2 Codex-Plus（文档与治理复核，75 次工具调用）
+
+**结论**：实施质量总体好（`verify_layout.py` 16/16，§8 的数字逐条可复现），但存在 **2 项 P0**。
+
+| # | 问题 |
 |---|---|
-| 变更记录 §8/§9/§10 的数字与描述 | 已按实测改写（16 条覆写日志；3 篇基线解析失败；角色样式零使用；表题未居中；章名三种；英文摘要关键词行已齐备） |
-| 标题 XML 转义 | 已修；实测注入 `A & B <研究> "x" \z` 后页眉部件 XML 良构 |
-| 行距断言 | 已补 `docdefault_line_240` / `normal_line_240`；**并修正一处潜在假阳性**：若 `Normal` 样式自身不带 `w:spacing`（继承 docDefaults），断言改为回落到 docDefaults 取值，仅当两者皆无时报失败 |
-| 拉丁字体断言 | 已补 `normal_latin_font` / `normal_latin_font_hAnsi` |
-| PF-B12 字体替换条款 | 已实现：`pdf_fonts_expected` 7 项、`pdf_fonts_missing` **[]**；实测 7 个 profile 字体全部判为存在，4 个对照字体（Arial / Helvetica / SimKai / Courier New）全部判为不存在 |
-| L2 边界收紧 | 已收紧为仅 `profile`/`kind`/`typography`；`page`/`citation`/`tables`/`pagination` 均被拒，合法形式放行 |
-| PF-B3 / PF-B10 条款 | 已修订（结构身份键清单与实现一致；PF-B10 补 L2 边界一句） |
-| `cmd_build_pdf` 双 JSON 与 `pdf_fonts` 未定义 | 已修 |
-| `paper.yaml` 畸形时的静默回落 | 已改为报错；实测畸形 `paper.yaml` 返回干净 JSON 错误（`stage: pre-build`），不再回落到 draft 档、不再抛栈 |
-| 回归基线固化 | `tools/verify_layout.py` 固化 16 项检查；D 组负例证明断言对"丢行距/丢幅面/改边距/换中文字体"均会失败 |
-| 新增静默降级路径 | 未发现。registry 缺项、refdoc 缺失、L2 越界、L2 与 `paper.yaml.layout_profile` 不一致、profile 解析失败、paper.yaml 畸形——均为显式失败 |
+| P0-1 | **变更记录描述的状态不存在**——记录通篇写"未提交""必须按 hunk 拆分""提交前仍需独立复核"，而变更已于 22:31 以混号单提交 `fc09407` 落地 |
+| P0-2 | PF-B12"table rule style"断言是假阴性——把产物改成全网格表后断言仍 0 failures（**与 Codex-Team M4/A-N2 独立同源命中**） |
 
-**尚缺**：F9 要求的**第二次独立复核**尚未完成——派出的第二轮独立子代理因用量上限中止，第二轮复查由本会话执行（上述表格）。**提交前仍需一次未参与者的独立复核**。
+**P1（5 项）**：`writing-spec.yaml` 的静默吞异常未修；`min_chars: 15000` 把"15000 字**左右**"的建议性写成硬下限；PF-B14 的来源等级在 profile 落地失真（`venue_advisory` 与 `self_chosen` 零实例，自选回落值被标成 `[TD]`/`[GB]`）；`stie.yaml` 的版次注记自相矛盾且指向不存在的开放项；`affiliation` 角色映射到 `Subtitle`（实际 `Subtitle` 装的是英文题名），`role_style_coverage` 因此给出假"已覆盖"信号。
+
+**其他**：目标刊 S1–S20 转录逐条核对**无遗漏、无杜撰**；GB/T 7714-2025 §9.3 出版年位置**经原文核实确在著者之后**，即本刊与现行版一致；§3 归属标注 4 处不准确；§9 开放项有 3 条已过时、3 条遗漏。
+
+---
+
+## 12. 第二轮之后的修订（本节所列均已落地并复跑）
+
+| 类别 | 修订 | 对应复核意见 |
+|---|---|---|
+| **P0** | `make_refdoc._apply_section` 改为**按实际创建的部件**生成引用；新增 `_assert_relationship_closure`（每个引用必须解析到类型正确、目标存在的部件） | Codex-Team M1 |
+| **P0** | 关系 Id 改为**动态分配**（`_next_rid`），已占用即报错而非静默跳过 | Codex-Team M2 |
+| **P0** | 构建前**重生成 refdoc 并逐字节比对**，不同步即构建失败 | Codex-Team M3 |
+| **P0** | 变更记录 §1/§7/§8 按**已提交**的事实改写；恢复方式如实写明 `git revert fc09407` 会连带回滚 GC-01-S/GC-03 | Codex-Plus P0-1 |
+| **P1** | 断言重写：页码域**精确匹配 PAGE 令牌**（排除 NUMPAGES）；三线表**逐边校验**（left/right/insideH/insideV 须 none、firstRow 只允许 bottom single）；蓝色检测**大小写不敏感 + 解析 themeColor + 覆盖 styles/document/header/footer**；**校验 sectPr 的页眉页脚引用可解析**且部件存在；**遍历全部 sectPr**；profile 未声明的维度记为 `skipped` 而非静默 | Codex-Team M4 / Codex-Plus P0-2 |
+| **P1** | **发现并修复一条既有产物缺陷**：pandoc 复制页眉页脚**部件**却不复制**关系**，交付的 docx 关系图不闭合（LibreOffice 容忍，Word 未必）。新增 `_repair_header_footer_relationships` 在构建后闭合关系图 | Codex-Team A-N6/A-N7 的成因 |
+| **P1** | 数学字体控制点移到**文档声明**：refdoc 与产物 docx 均写入 `m:mathFont`（pandoc 会丢弃 reference 的 `m:mathPr`，故构建后重写），并断言 `math_font_declared`；PDF 阶段的数学替代记为**宿主替代**而非 profile 失败 | Codex-Team M5 |
+| **P1** | 断言与生成器**同源**：正文大小一律取 `typography.sizes.body`（回落 `body_pt`），PF-B13 示例 `body_pt` 覆写不再使构建失败 | Codex-Team M6 |
+| **P1** | L2 边界收紧到 `typography` 的 `body_pt`/`line_spacing`/`first_line_indent_chars` 三个键；venue 角色表（fonts/sizes/heading_numbering）不可被论文覆写；PF-B13 文本同步 | Codex-Team M7 |
+| **P1** | `pagination` 的 `footer_right`/`header_right`/`journal` 三个 schema 合法取值**已实现**（页码位置/对齐、页眉内容源） | Codex-Team M8 |
+| **P1** | `pdffonts` 不可用 → **构建失败**，不再让不可核验的 PDF 通过 | Codex-Team M9 |
+| **P1** | `paper.yaml` 改为**单一 YAML 解析**（`_get_paper_info` 不再用正则），消除标题/文件名的两套读法 | Codex-Team M10 |
+| **P1** | `min_chars` 由 15000 改为 `null`（本刊"15000 字**左右**"属建议性，不得作硬下限）；模板与七篇论文同步 | Codex-Plus P1-4 |
+| **P1** | profile 来源等级扩到 PF-B14 的 8 级：新增 `[S#-adv]`（本刊建议性）与 `[SC]`（**自选回落**），并把边距/行距/西文字体/页码字号/页码位置/页眉/作者简介字号/脚注字号改标 `[SC]` | Codex-Plus P1-5 |
+| **P1** | `stie.yaml` 版次注记改为与 `entry_order` 一致（按本刊 S16 模板 = 2025 版形态），并指向**新增的开放项 15** | Codex-Plus P1-6 |
+| **P1** | `role_style_coverage` 修正 `affiliation` 误映射（`Subtitle` 实为英文题名），并单列 `title_zh`/`title_en` | Codex-Plus P1-7 |
+| **P2** | `self_check`：页边距期望值改为取自 profile；`table_three_line` **纳入判定**；新增字体与页眉引用检查 | Codex-Team M11 |
+| **P2** | `make_refdoc` 补齐 `TitleChar`/`SubtitleChar` 联动字符样式（原先仍带 pandoc 主题字体与 28pt） | Codex-Team 建议项 |
+| **P2** | docx 构建**字节可复现**：所有部件固定 zip 时间戳 + 固定 `docProps/core.xml` 日期（连跑三次 sha256 一致） | Codex-Team C.6 |
+| **P2** | `verify_layout.py`：负例由 4 个扩到 **9 个**（新增缩进、网格表、NUMPAGES、页眉引用、小写蓝字），全部要求命中目标检查项；临时目录改用 `tempfile` | Codex-Team F 组 |
+
+### 12.1 修订后的验证结果（可复跑）
+
+```
+$ python3 -I tools/verify_layout.py
+TOTAL 21  PASS 21  FAIL 0
+```
+
+| 组 | 内容 | 结果 |
+|---|---|---|
+| A | schema 正向（3 profile + 模板 L2 + 七篇论文 L2） | 11 targets, 0 failed |
+| B | schema 反向（新 profile 对改前基线） | stie 1 errors / gbt7713 1 errors（符合预期） |
+| C | refdoc 幂等 + 自检（含三线表逐边、字体、页眉引用闭包） | 3 profile `in_sync=True`、`self_check=True` |
+| D | **9 个负例** + 正例 | 全部命中目标检查项并失败；未改动产物 0 failures |
+| E | 标题 XML 转义（`A & B <研究> "x" \z`） | 页眉部件 well-formed |
+| F | L2 边界（含 `typography` 子树越权） | 越权全部拒绝，合法形式放行 |
+| G | writing-spec 解析与目标刊约束 | 7 papers, 0 problems |
+
+端到端：`build docx` → ok / `layout_assertions: pass` / 覆写日志 16 条；`build pdf` → ok / 23 页 / `pdf_fonts_missing: []`；七篇 `paper.py check` **7/7 pass**；docx 连跑三次 sha256 一致。
+
 
 ---
 

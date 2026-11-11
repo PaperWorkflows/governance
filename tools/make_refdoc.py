@@ -295,6 +295,22 @@ def _neutralise_theme_colours(styles: str) -> str:
     return re.sub(r"<w:color([^>]*)/>", repl, styles)
 
 
+def _ensure_style(styles: str, style_id: str, name: str, **kwargs) -> str:
+    """Create a minimal paragraph style if absent, then patch it (see _patch_style).
+
+    pandoc's base reference doc lacks venue-specific roles (e.g. AuthorBio/S17);
+    profiles declare them, so the generator materialises the style on demand.
+    """
+    pattern = r'<w:style [^>]*w:styleId="%s"[^>]*>' % re.escape(style_id)
+    if re.search(pattern, styles):
+        return _patch_style(styles, style_id, **kwargs)
+    block = (f'<w:style w:type="paragraph" w:customStyle="1" w:styleId="{style_id}">'
+             f'<w:name w:val="{name}"/><w:basedOn w:val="Normal"/>'
+             f'<w:pPr></w:pPr><w:rPr></w:rPr></w:style>')
+    idx = styles.rindex("</w:styles>")
+    return _patch_style(styles[:idx] + block + styles[idx:], style_id, **kwargs)
+
+
 def _patch_style(styles: str, style_id: str, **kwargs) -> str:
     """Patch one <w:style> block inside styles.xml."""
     pattern = r'<w:style [^>]*w:styleId="%s"[^>]*>.*?</w:style>' % re.escape(style_id)
@@ -718,6 +734,19 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
                            rpr={"fonts": f["abstract"], "size_pt": s.get("abstract"), "black": True},
                            ppr={"align": "both", "first_line_chars": 0, "first_line_pt": 0,
                                 "space_before_pt": 0, "space_after_pt": 6})
+
+    # AuthorBio: venue S17 role — one paragraph per author (profile author_bio_layout:
+    # body font family, 9pt, justify, first-line indent 2 chars); created on demand
+    # because pandoc's base reference doc has no such style.
+    abl = role.get("author_bio_layout") or {}
+    styles = _ensure_style(styles, "AuthorBio", "author bio",
+                           rpr={"fonts": f["body"], "size_pt": abl.get("pt", s.get("author_bio")),
+                                "black": True},
+                           ppr={"align": "both",
+                                "first_line_chars": abl.get("first_line_indent_chars", 2),
+                                "first_line_pt": abl.get("first_line_indent_chars", 2) * (abl.get("pt", s.get("author_bio")) or 9),
+                                "space_before_pt": 0, "space_after_pt": 3})
+
     styles = _patch_style(styles, "SourceCode",
                            rpr={"fonts": (None, f["code"][1]), "size_pt": s.get("code")})
     styles = _patch_style(styles, "VerbatimChar",

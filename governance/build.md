@@ -83,7 +83,8 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 - A layout profile is a declaration; it becomes binding only through a generated **reference docx** consumed by the build (`pandoc --reference-doc`).
 - The reference docx is **generated from the profile** by `tools/make_refdoc.py` (single source of truth). Hand-editing files under `templates/layout/refdoc/` is forbidden; profile change ⇒ regenerate ⇒ review the diff.
 - Registry entries carry the reference docx path. A missing reference docx **fails the build**; silent fallback to the pandoc default reference doc is forbidden (it silently drops page size, margins, line spacing and CJK font — verified on 2026-11-11 against the v0.3.1 artifacts).
-- `tools/make_refdoc.py` and `tools/layoutlib.py` use the **standard library only**; the project toolchain runs under `python3 -I`, which excludes user site-packages. Declared toolchain dependencies are limited to `yaml` and `jsonschema` (both in `/usr/lib/python3/dist-packages`).
+- The refdoc generator writes OOXML directly with the **standard library only** — `python-docx`/`lxml` live in user site-packages and are unavailable under `python3 -I`, so they must not be relied upon. The toolchain's declared third-party dependencies are `yaml` and `jsonschema` (both in `/usr/lib/python3/dist-packages`).
+- **The build verifies that the checked-in reference docx still matches its profile**: it regenerates the refdoc and compares byte for byte. A stale or hand-edited refdoc **fails the build** — otherwise the "generated from the profile" promise would be unenforced.
 - Reference docx generation must be **deterministic** (fixed zip timestamps and core.xml dates) so that regeneration is byte-comparable and a profile change is visible as a diff.
 
 ### PF-B12 版式落地校验
@@ -91,13 +92,15 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 - After building, the produced docx is re-parsed and asserted against the merged profile: page size, margins, body font family (Latin and CJK), body size, line spacing, first-line indent, heading sizes, table rule style, page-number field, header/footer part well-formedness, and absence of the pandoc default blue heading colour.
 - Any failed assertion **fails the build**. The manifest records the assertion notes and any declared limitation (e.g. formulas not carried as editable equation objects, or a profile role whose paragraph style the produced document never uses).
 - Assertions must cover the **regression** case as well: a build that loses page size, margins, line spacing or CJK font relative to the profile is a failure even when the file opens correctly. `tools/verify_layout.py` proves this by mutating a built artifact and requiring the assertion layer to fail.
-- Font substitution by the PDF conversion step is recorded, never silent: the build compares the font families the profile requires against the families actually embedded in the PDF, and any family that is absent is written to the manifest as a limitation with the missing list.
+- Font substitution by the PDF conversion step is recorded, never silent: the build compares the font families the profile requires against the families actually embedded in the PDF, and any family that is absent is written to the manifest as a limitation with the missing list. A PDF whose font inventory cannot be produced (`pdffonts` unavailable) **fails the build** — an unverifiable PDF must not be published.
+- The **math font** is controlled at the document level: the produced docx must declare `m:mathFont` for the profile's math family (pandoc drops `m:mathPr` from the reference settings.xml, so the build re-applies it). The PDF's math glyphs come from the host's LibreOffice math configuration and are therefore a **host substitution**, recorded as such rather than as a profile failure.
+- Where the profile states a dimension the document does not (e.g. a role the body never uses), the assertion records it as **skipped**, so the manifest shows which dimensions were not verified.
 
 ### PF-B13 L2 覆盖边界
 
 - L2 (`build/layout.yaml`) carries **selection keys only**: `profile` (must equal `paper.yaml.layout_profile`) and `kind: paper`.
 - Structure-identity keys (`page`, `citation`, `formulas`, `target_venue`) appearing in L2 **fail the build**; changing them requires profile versioning (PF-B3).
-- L2 may override `typography` keys only (e.g. `body_pt`, `line_spacing`); every override is logged with old/new/source-layer (PF-B10).
+- L2 may override `typography` keys only, and within `typography` only `body_pt`, `line_spacing` and `first_line_indent_chars`. The role table (`fonts` / `sizes` / `heading_numbering`) is a **venue decision**; overriding it from a paper would bypass profile versioning, so it fails the build. Every override is logged with old/new/source-layer (PF-B10).
 - Each layer and the merged result validate against `schemas/layout-profile.schema.json`; unknown keys fail the build.
 
 ### PF-B14 版式数值来源等级
