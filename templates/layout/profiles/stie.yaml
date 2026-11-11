@@ -5,16 +5,20 @@
 #
 # 来源等级（source_level）约定——避免把"我们选的"当成"期刊要求的"：
 #   [S#]     本刊格式要求明示（S1–S20）
+#   [S#-adv] 本刊格式要求为建议性（"一般不超过…""…为宜""建议"）——按目标值+容差执行
 #   [GB]     国标基线回落（本刊未规定）：GB/T 7713.2-2022 附录 B 表 B.1 等
 #   [CY]     行业标准：CY/T 170-2019
 #   [JT]     期刊模板实测（线宽等非国标项）
 #   [TD]     通行做法（无单一权威源）
+#   [SC]     **本项目自选回落**——本刊未规定且国标亦未规定，由本项目选定
 # 本刊明示文本完全未规定：字号、字体、页边距、行距、页码、图题字号、三线表线宽——
-# 这些一律回落国标基线并逐项标注；编辑部模板取得后以实测值覆盖（开放项）。
+# 这些一律回落国标基线或自选回落并逐项标注；编辑部模板取得后以实测值覆盖（开放项）。
 #
 # 等级词表对照（PF-B14 注释式 provenance；本文件以缩写标注）：
-#   [S#]=venue_requirement  [GB]=national_standard(_advisory)  [CY]=industry_standard
-#   [JT]=journal_measured   [TD]=common_practice
+#   [S#]=venue_requirement  [S#-adv]=venue_advisory
+#   [GB]=national_standard / national_standard_advisory（资料性附录按后者理解）
+#   [CY]=industry_standard  [JT]=journal_measured  [TD]=common_practice
+#   [SC]=self_chosen
 # 结构化 provenance 块（键级）为开放项；当前以注释标注 + 变更记录登记为准。
 
 # 覆写关系：本档覆盖 L0（draft）；论文 L2 只可再覆写 typography 可覆盖键。
@@ -24,16 +28,16 @@ kind: venue
 target_venue: 数智技术研究与应用
 page:
   size: A4                              # [GB] GB/T 7713.2-2022 §5.1.2
-  margin:
-    top: 25.4                           # [TD] 本刊未规定；沿用项目默认
+  margin:                                # [SC] 本刊未规定；GB/T 7713.1-2025 §6.10 的 25/20mm 仅适用学位论文
+    top: 25.4
     bottom: 25.4
     left: 25.4
     right: 25.4
 typography:
   body_pt: 10.5                         # [GB] 附录 B 表 B.1：正文五号宋体
-  line_spacing: 1.5                     # [TD] 本刊未规定；沿用 L0
+  line_spacing: 1.5                     # [SC] 本刊未规定、国标亦未规定；沿用 L0 草案档
   east_asia_font: "宋体"                # [GB] 附录 B
-  latin_font: "Times New Roman"         # [TD] 中文期刊惯例（本刊未规定）
+  latin_font: "Times New Roman"         # [SC] 本刊未规定；中文期刊惯例
   first_line_indent_chars: 2            # [GB] GB/T 7713.1-2025 §6.5.2
   fonts:
     title_east_asia: "黑体"             # [GB] 附录 B：题名小二黑体
@@ -63,11 +67,11 @@ typography:
     table_note: 9
     reference_heading: 12               # 小四黑体
     reference_entry: 9                  # 小五宋体
-    footnote: 7.5
-    author_bio: 9                       # [S17] 角色新增；字号取附录 B"其他项目"档 [GB]
+    footnote: 7.5                  # [SC] 附录 B 无脚注行 → 自选回落
+    author_bio: 9                       # [SC] 角色由 [S17] 新增；字号本刊未规定，附录 B 无对应项 → 自选回落
     funding: 9                          # [GB] 附录 B"其他项目"
-    page_number: 7.5                    # [GB] GB/T 3179 §8.6（本刊未规定）
-    header: 9
+    page_number: 7.5                    # [SC] GB/T 3179 §8.6 只要求"固定位置"，未规定字号 → 自选回落
+    header: 9                           # [SC] 自选回落
     code: 10.5
   paragraph:                            # [TD] 段前段后 0
     alignment: justify
@@ -113,7 +117,7 @@ citation:
   system: author_date                   # [S13]
   entry_order: author_year_first        # [S16] "著者，出版年." 开头（与 GB 默认顺序不同，以本刊为准）
   standard_edition: "GB/T 7714-2015"    # [S13] 本刊文本引 2015 版
-  standard_edition_note: "现行版为 GB/T 7714-2025（2026-07-01 实施）；按本刊文本执行 2015 版著录格式，版次差异待编辑部确认（GC-2026-1111-02 开放项 2）"
+  standard_edition_note: "本刊文本引 GB/T 7714—2015；现行版为 GB/T 7714—2025（2026-07-01 实施），其 §9.3 著者-出版年制同为出版年前置于著者之后，与本刊 S16 模板一致。故著录按本刊 S16 模板执行（= 2025 版形态）；版次差异待编辑部确认（GC-2026-1111-02 开放项 15）"
   preferred_recency_years: 5            # [S13] 建议优先引用 5 年内成果
   in_text_forms:                        # [S14]（内容级核对清单见 PF-W11/PF-RV7；此处登记版式形式）
     zh_single: "张三（2020）"           # 全角括号、无逗号
@@ -132,8 +136,8 @@ references:
   hanging_indent_cm: 0.74
   entry_spacing_pt: 0
 pagination:
-  page_number_position: footer_center   # [GB] GB/T 3179 §8.6（本刊未规定）
-  header: title_center                  # [GB] §9.2
+  page_number_position: footer_center   # [SC] §8.6 只要求"固定位置"，未规定位置形态 → 自选回落
+  header: title_center                  # [SC] §9.2 只规定标志项目（题名），未规定位置 → 自选回落
   header_pt: 9
 punctuation:                            # [GB] GB/T 15834-2011
   dash_em: 2

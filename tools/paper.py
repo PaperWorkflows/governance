@@ -8,7 +8,7 @@ if not sys.flags.isolated:
 
 sys.dont_write_bytecode = True
 
-import argparse, json, re, subprocess, yaml, zipfile
+import argparse, hashlib, json, re, subprocess, yaml, zipfile
 import xml.etree.ElementTree
 from pathlib import Path
 from datetime import datetime, timezone
@@ -1853,24 +1853,33 @@ def cmd_review_debate(args):
 # ── build ─────────────────────────────────────────────────────────
 
 def _get_paper_info(dest: Path) -> dict:
-    """Extract basic paper info from paper.yaml."""
+    """Extract basic paper info from paper.yaml.
+
+    The values are read from the parsed YAML, not from a regex over the raw
+    text: a regex mis-reads YAML block scalars ('title: >' yielded '>'), and the
+    title drives both the artifact filename and the running head.
+    """
     py = dest / "paper.yaml"
     info = {"id": dest.name, "version": "0.1.0", "title": "(untitled)", "stage": "proposal", "paper_type": "empirical"}
     if not py.exists():
         return info
-    text = py.read_text(encoding="utf-8")
-    m = re.search(r'^paper_version:\s*(.+)$', text, re.MULTILINE)
-    if m:
-        info["version"] = m.group(1).strip()
-    m = re.search(r'^title:\s*["\']?([^"\'\n]+)', text, re.MULTILINE)
-    if m:
-        info["title"] = m.group(1).strip()
-    m = re.search(r'^stage:\s*(.+)$', text, re.MULTILINE)
-    if m:
-        info["stage"] = m.group(1).strip()
-    m = re.search(r'^paper_type:\s*(.+)$', text, re.MULTILINE)
-    if m:
-        info["paper_type"] = m.group(1).strip()
+    try:
+        data = yaml.safe_load(py.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return info
+    if not isinstance(data, dict):
+        return info
+    for key in ("paper_version", "version"):
+        if data.get(key):
+            info["version"] = str(data[key]).strip()
+            break
+    title = data.get("title")
+    if isinstance(title, str) and title.strip():
+        info["title"] = title.strip().splitlines()[0].strip()
+    if data.get("stage"):
+        info["stage"] = str(data["stage"]).strip()
+    if data.get("paper_type"):
+        info["paper_type"] = str(data["paper_type"]).strip()
     return info
 
 
@@ -1967,9 +1976,30 @@ _FONT_SUBSTITUTIONS = {
     "楷体": ["KaiTi", "Kaiti", "NotoSerifCJKsc", "AR PL UKai"],
     "仿宋": ["FangSong", "Fangsong", "NotoSerifCJKsc"],
     "Times New Roman": ["TimesNewRoman", "LiberationSerif", "NimbusRoman", "TeX Gyre Termes"],
-    "Cambria Math": ["CambriaMath", "OpenSymbol", "STIXTwoMath", "DejaVuSerif"],
-    "Consolas": ["Consolas", "DejaVuSansMono", "LiberationMono", "Sarasa"],
+    # NOTE: OpenSymbol / SymbolMT are symbol fonts, not math fonts — listing them
+    # here would mask a genuinely missing math font (PF-B12 no silent substitution).
+    "Cambria Math": ["CambriaMath", "STIXTwoMath", "LatinModernMath", "XITS Math"],
+    "Consolas": ["Consolas", "DejaVuSansMono", "LiberationMono", "Sarasa Mono"],
 }
+
+# PostScript style suffixes pdffonts reports after the family name.
+_FONT_STYLE_SUFFIXES = (
+    "PSMT", "PS-BoldMT", "PS-ItalicMT", "PS-BoldItalicMT",
+    "BoldMT", "ItalicMT", "BoldItalicMT", "Bold", "Italic", "BoldItalic",
+    "Regular", "Light", "Medium", "Semibold", "BoldItalic",
+)
+
+
+def _canonical_font(name: str) -> str:
+    """Normalise a PDF font name to its family: drop the subset prefix and the
+    PostScript style suffix, keep everything else. 'TimesNewRomanPSMT' ->
+    'timesnewroman'; 'ConsolasX' -> 'consolasx' (a different family)."""
+    s = name.split("+")[-1]           # drop the ABCDEF+ subset prefix
+    for suffix in _FONT_STYLE_SUFFIXES:
+        if s.endswith(suffix) and len(s) > len(suffix):
+            s = s[: -len(suffix)]
+            break
+    return "".join(ch for ch in s if ch.isalnum()).lower()
 
 
 def _profile_font_families(role: dict) -> list[str]:
@@ -1992,19 +2022,16 @@ def _expected_pdf_fonts(layout_block: dict) -> list[str]:
 
 
 def _font_present(family: str, embedded: list[str]) -> bool:
-    """True when the family (or a declared substitution for it) is embedded."""
-    import unicodedata  # noqa: F401  (kept for future normalisation work)
+    """True when the family (or a declared substitution for it) is embedded.
 
-    def norm(s: str) -> str:
-        return "".join(ch for ch in s if ch.isalnum()).lower()
-
+    Matching is on the canonical family name (subset prefix and PostScript style
+    suffix removed), and only exact — a bidirectional substring test would let
+    'ConsolasX' satisfy 'Consolas' and 'SimHeiSun' satisfy 'SimHei'.
+    """
     names = [family] + _FONT_SUBSTITUTIONS.get(family, [])
-    targets = [norm(n) for n in names]
-    for emb in embedded:
-        e = norm(emb.split("+")[-1])  # pdffonts prefixes subset names with ABCDEF+
-        if any(t and (t == e or t in e or e in t) for t in targets):
-            return True
-    return False
+    targets = {_canonical_font(n) for n in names}
+    targets.discard("")
+    return any(_canonical_font(emb) in targets for emb in embedded)
 
 
 def _resolve_layout_for_build(dest: Path, paper_cfg: dict) -> dict:
@@ -2061,43 +2088,48 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
     sizes = t.get("sizes", {}) or {}
 
     def check(name, expected, actual):
-        if expected is not None and actual != expected:
+        if expected is None:
+            # The profile does not state this dimension. Record it as skipped so the
+            # manifest shows which dimensions were NOT verified (never a silent pass).
+            notes.append({"check": name, "value": None, "status": "skipped_no_profile_value"})
+        elif actual != expected:
             failures.append({"check": name, "expected": expected, "actual": actual})
         else:
             notes.append({"check": name, "value": actual})
 
-    # headings must not carry the pandoc default blue theme color anywhere
-    if "0F4761" in styles:
-        failures.append({"check": "heading_color_blue_absent", "expected": "no 0F4761", "actual": "found"})
+    # No theme/accent heading colour may survive — in any part, in any case form.
+    header_footer_xml = "".join(
+        z.read(n).decode("utf-8", "ignore") for n in parts
+        if re.match(r"word/(header|footer)\d*\.xml", n))
+    if layoutlib.blue_colour_present(styles, docxml, header_footer_xml):
+        failures.append({"check": "heading_color_accent_absent",
+                         "expected": "no accent/theme heading colour", "actual": "found"})
     else:
-        notes.append({"check": "heading_color_blue_absent", "value": True})
+        notes.append({"check": "heading_color_accent_absent", "value": True})
 
     def attr(tag: str, name: str, xml: str) -> int | None:
         m = re.search(r"<" + tag + r"\b[^>]*\b" + name + r'="(\d+)"', xml)
         return int(m.group(1)) if m else None
 
     normal = _style_block(styles, "Normal")
-    if body_pt is not None:
+    # The generator writes the body size from typography.sizes.body (which falls back
+    # to body_pt); assert against the same source of truth so an L2 override of
+    # body_pt cannot make the generator and the assertion disagree.
+    body_size_pt = sizes.get("body", body_pt)
+    if body_size_pt is not None:
         m = re.search(r'<w:sz w:val="(\d+)"', normal)
-        check("normal_sz_halfpt", int(round(body_pt * 2)), int(m.group(1)) if m else None)
+        check("normal_sz_halfpt", int(round(body_size_pt * 2)), int(m.group(1)) if m else None)
     indent = t.get("first_line_indent_chars")
     if indent:
         m = re.search(r'w:firstLineChars="(\d+)"', normal)
         check("normal_first_line_chars", int(round(indent * 100)), int(m.group(1)) if m else None)
 
-    # line spacing: the regression that silently drops 1.5x spacing must fail the build
+    # line spacing: the regression that silently drops 1.5x spacing must fail the build.
+    # Normal may define it directly or inherit it from docDefaults.
     line_spacing = t.get("line_spacing")
     if line_spacing:
-        expected_line = int(round(line_spacing * 240))
-        spacing_re = r'<w:spacing[^>]*w:line="(\d+)"[^>]*w:lineRule="auto"'
-        normal_block = _style_block(styles, "Normal")
-        dd_block = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles, re.S)
-        m_dd = re.search(spacing_re, dd_block.group(0) if dd_block else "")
-        m_n = re.search(spacing_re, normal_block)
-        check("docdefault_line_240", expected_line, int(m_dd.group(1)) if m_dd else None)
-        # Normal may inherit the spacing from docDefaults; only fail when neither has it.
-        actual_n = int(m_n.group(1)) if m_n else (int(m_dd.group(1)) if m_dd else None)
-        check("normal_line_240", expected_line, actual_n)
+        check("effective_line_240", int(round(line_spacing * 240)),
+              layoutlib.effective_line_spacing(styles))
 
     for sid, key in (("Title", "title_zh"), ("Heading1", "heading1"), ("Heading2", "heading2")):
         block = _style_block(styles, sid)
@@ -2126,33 +2158,65 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
             failures.append({"check": f"{part}_wellformed", "expected": "well-formed XML",
                              "actual": str(exc)[:160]})
 
-    # page geometry from sectPr (attribute order is not stable across writers — match per attribute)
+    # Every header/footer reference in sectPr must resolve to a relationship of the
+    # right type whose target part exists — a dangling reference silently drops the
+    # running head while the build still passes.
+    rels_xml = z.read("word/_rels/document.xml.rels").decode("utf-8") if \
+        "word/_rels/document.xml.rels" in parts else ""
+    rel_map = {m.group(2): (m.group(1), m.group(3)) for m in
+               re.finditer(r'<Relationship Type="([^"]+)" Id="([^"]+)" Target="([^"]+)"', rels_xml)}
+    part_names = set(parts)
+    for ref_kind, tag in (("header", "w:headerReference"), ("footer", "w:footerReference")):
+        for m in re.finditer(r"<" + tag + r'\b[^>]*r:id="([^"]+)"', docxml):
+            rid = m.group(1)
+            entry = rel_map.get(rid)
+            if entry is None:
+                failures.append({"check": f"{ref_kind}_reference_resolves",
+                                 "expected": rid, "actual": "no such relationship"})
+            else:
+                rel_type, target = entry
+                if not rel_type.endswith("/" + ref_kind):
+                    failures.append({"check": f"{ref_kind}_reference_type",
+                                     "expected": ref_kind, "actual": rel_type})
+                elif ("word/" + target) not in part_names:
+                    failures.append({"check": f"{ref_kind}_reference_target_exists",
+                                     "expected": "word/" + target, "actual": "missing"})
+
+    pagination = merged.get("pagination", {}) or {}
+    if pagination.get("header", "title_center") != "none":
+        check("header_referenced", True, bool(re.search(r"<w:headerReference\b", docxml)))
+        check("header_part_present", True,
+              any(re.match(r"word/header\d*\.xml", n) for n in parts))
+    if pagination.get("page_number_position", "footer_center") != "none":
+        page_field_parts = [n for n in parts if re.match(r"word/(header|footer)\d*\.xml", n)]
+        check("page_number_field", True,
+              any(layoutlib.has_exact_page_field(z.read(n).decode("utf-8", "ignore"))
+                  for n in page_field_parts))
+
+    # page geometry from EVERY sectPr (a multi-section document may differ)
     page = merged.get("page", {}) or {}
     size_mm = {"A4": (210.0, 297.0), "A3": (297.0, 420.0), "letter": (215.9, 279.4), "legal": (215.9, 355.6)}
     w_mm, h_mm = size_mm.get(page.get("size", "A4"), (210.0, 297.0))
-    check("page_width_twips", twips(w_mm), attr("w:pgSz", "w:w", docxml))
-    check("page_height_twips", twips(h_mm), attr("w:pgSz", "w:h", docxml))
+    sect_blocks = re.findall(r"<w:sectPr\b.*?</w:sectPr>", docxml, re.S) or [docxml]
     margin = page.get("margin", {}) or {}
-    for side in ("top", "bottom", "left", "right"):
-        val = attr("w:pgMar", f"w:{side}", docxml)
-        if val is None:
-            failures.append({"check": f"margin_{side}_twips", "expected": twips(margin.get(side, 25.4)), "actual": None})
-        else:
-            check(f"margin_{side}_twips", twips(margin.get(side, 25.4)), val)
+    for idx, sect in enumerate(sect_blocks):
+        suffix = "" if idx == 0 else f"_sect{idx + 1}"
+        check(f"page_width_twips{suffix}", twips(w_mm), attr("w:pgSz", "w:w", sect))
+        check(f"page_height_twips{suffix}", twips(h_mm), attr("w:pgSz", "w:h", sect))
+        for side in ("top", "bottom", "left", "right"):
+            val = attr("w:pgMar", f"w:{side}", sect)
+            if val is None:
+                failures.append({"check": f"margin_{side}_twips{suffix}",
+                                 "expected": twips(margin.get(side, 25.4)), "actual": None})
+            else:
+                check(f"margin_{side}_twips{suffix}", twips(margin.get(side, 25.4)), val)
 
-    # footer page number field
-    footer_parts = [n for n in parts if re.match(r"word/footer\d*\.xml", n)]
-    has_page = any("PAGE" in z.read(n).decode("utf-8", "ignore") for n in footer_parts)
-    pagination = merged.get("pagination", {}) or {}
-    if pagination.get("page_number_position", "footer_center") != "none":
-        check("footer_page_field", True, has_page)
-
-    # three-line table style
+    # three-line table style: a grid table must NOT satisfy this
     tables_cfg = merged.get("tables", {}) or {}
     if tables_cfg.get("style") == "three_line":
         block = _style_block(styles, "Table")
-        has_borders = "tblBorders" in block and block.count('w:val="single"') >= 2
-        check("table_three_line_borders", True, has_borders)
+        check("table_three_line_borders", True, layoutlib.three_line_table_ok(block))
+
 
     # formula objects: OMML present iff source math markers exist (checked by caller)
     notes.append({"check": "omath_count", "value": docxml.count("<m:oMath")})
@@ -2162,12 +2226,15 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
     # in the product means the role silently did not reach the page. This is recorded
     # as a limitation, so a reviewer can see it (PF-B12 no-silent-degradation).
     used = set(re.findall(r'<w:pStyle w:val="([^"]+)"', docxml))
+    # The style each profile role is expected to land in. `affiliation` is NOT
+    # Subtitle: Subtitle carries the English title; the affiliation line falls
+    # back to BlockText until the body is restructured (see change-record §9).
     role_styles = {
         "abstract": "Abstract", "abstract_label": "AbstractTitle",
         "reference_entry": "Bibliography", "reference_heading": "Bibliography",
         "caption": "Caption", "table_caption": "TableCaption",
         "figure_caption": "ImageCaption", "author": "Author",
-        "affiliation": "Subtitle", "title": "Title",
+        "title_zh": "Title", "title_en": "Subtitle",
     }
     unused = sorted({style for style in role_styles.values() if style not in used})
     notes.append({"check": "role_style_coverage", "value": {
@@ -2190,22 +2257,185 @@ def _xml_escape_text(text: str) -> str:
                 .replace(">", "&gt;"))
 
 
+
+
+def _harden_tables(docx_path: Path) -> int:
+    """Keep table rows intact across page breaks (cantSplit) and repeat the header
+    row (tblHeader) — carries over the pre-refactor pipeline's post-processing
+    (P2 REL-0002 practice) into the governed build. Returns rows patched."""
+    import io
+    src = zipfile.ZipFile(docx_path)
+    doc = src.read("word/document.xml").decode("utf-8")
+    out = {}
+    patched = 0
+    for name in src.namelist():
+        payload = src.read(name)
+        if name == "word/document.xml":
+            text = payload.decode("utf-8")
+            parts = re.split(r"(<w:tbl>.*?</w:tbl>)", text, flags=re.S)
+            for pi, part in enumerate(parts):
+                if not part.startswith("<w:tbl>"):
+                    continue
+                rows = re.split(r"(<w:tr[ >])", part)
+                first_row = True
+                rebuilt = []
+                for seg in rows:
+                    if seg == "<w:tr>" or seg == "<w:tr ":
+                        if first_row:
+                            rebuilt.append(seg + "<w:trPr><w:cantSplit/><w:tblHeader/></w:trPr>")
+                            first_row = False
+                        else:
+                            rebuilt.append(seg + "<w:trPr><w:cantSplit/></w:trPr>")
+                        patched += 1
+                    else:
+                        rebuilt.append(seg)
+                parts[pi] = "".join(rebuilt)
+            payload = "".join(parts).encode("utf-8")
+        out[name] = payload
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for name, payload in out.items():
+            dst.writestr(name, payload)
+    docx_path.write_bytes(_zip_parts(out))
+    return patched
+
+
+def _assert_refdoc_in_sync(profile_name: str, refdoc_path: Path) -> dict:
+    """Regenerate the reference docx from its profile and compare it with the
+    checked-in file (PF-B11: the refdoc is generated, never hand-edited)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("make_refdoc_mod", Path(__file__).resolve().parent / "make_refdoc.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["make_refdoc_mod"] = mod
+    spec.loader.exec_module(mod)
+    try:
+        data, checks = mod.build_refdoc(profile_name, mod.default_reference_bytes())
+    except Exception as exc:  # noqa: BLE001
+        return {"in_sync": False, "reason": f"regeneration failed: {exc}",
+                "refdoc": str(refdoc_path)}
+    current = refdoc_path.read_bytes() if refdoc_path.exists() else b""
+    return {
+        "in_sync": current == data,
+        "checked_in_sha256_16": hashlib.sha256(current).hexdigest()[:16] if current else None,
+        "regenerated_sha256_16": hashlib.sha256(data).hexdigest()[:16],
+        "self_check_pass": checks.get("pass"),
+        "refdoc": str(refdoc_path),
+        "reason": None if current == data else "checked-in refdoc differs from the profile",
+    }
+
+
+def _apply_math_font_to_output(docx_path: Path, math_font: str | None) -> bool:
+    """Re-apply the OMML math font to the produced document.
+
+    pandoc drops m:mathPr from the reference document's settings.xml, so the
+    math font declared in the profile would otherwise never reach the output.
+    """
+    import io
+    if not math_font:
+        return False
+    src = zipfile.ZipFile(docx_path)
+    parts = {n: src.read(n) for n in src.namelist()}
+    if "word/settings.xml" not in parts:
+        return False
+    text = parts["word/settings.xml"].decode("utf-8")
+    new_text = layoutlib.apply_math_font(text, math_font)
+    if new_text == text:
+        return False
+    parts["word/settings.xml"] = new_text.encode("utf-8")
+    docx_path.write_bytes(_zip_parts(parts))
+    return True
+
+
+def _repair_header_footer_relationships(docx_path: Path) -> dict:
+    """Close the header/footer relationship graph of a pandoc-produced docx.
+
+    pandoc copies the reference doc's header/footer PARTS into the output but does
+    not copy their RELATIONSHIPS, leaving sectPr pointing at relationship ids that
+    do not exist. LibreOffice tolerates that and renders the parts anyway; Word
+    may not, and the package is formally invalid. This adds the missing
+    relationships (or corrects a wrong target) so the delivered docx is well-formed.
+
+    Returns {"repaired": [...], "skipped": [...]}.
+    """
+    import io
+    src = zipfile.ZipFile(docx_path)
+    parts = {n: src.read(n) for n in src.namelist()}
+    names = set(parts)
+    doc = parts["word/document.xml"].decode("utf-8")
+    rels_name = "word/_rels/document.xml.rels"
+    rels = parts[rels_name].decode("utf-8")
+
+    rel_map = {m.group(2): (m.group(1), m.group(3)) for m in
+               re.finditer(r'<Relationship Type="([^"]+)" Id="([^"]+)" Target="([^"]+)"', rels)}
+    repaired, skipped = [], []
+
+    for ref_kind, tag, part_prefix in (("header", "w:headerReference", "word/header"),
+                                       ("footer", "w:footerReference", "word/footer")):
+        for m in re.finditer(r"<" + tag + r'\b[^>]*r:id="([^"]+)"', doc):
+            rid = m.group(1)
+            candidates = sorted(n for n in names if re.fullmatch(re.escape(part_prefix) + r"\d*\.xml", n))
+            if not candidates:
+                skipped.append({"kind": ref_kind, "rid": rid, "reason": "no part in package"})
+                continue
+            target = candidates[0].split("/", 1)[1]
+            entry = rel_map.get(rid)
+            if entry and entry[1] == target and entry[0].endswith("/" + ref_kind):
+                continue
+            rel_type = ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
+                        + ref_kind)
+            if entry is None:
+                rel = (f'<Relationship Type="{rel_type}" Id="{rid}" Target="{target}" />')
+                rels = rels.replace("</Relationships>", rel + "</Relationships>")
+                rel_map[rid] = (rel_type, target)
+                repaired.append({"kind": ref_kind, "rid": rid, "target": target})
+            else:
+                rels = re.sub(r'(<Relationship Type="[^"]+" Id="%s" Target=")[^"]*(")' % re.escape(rid),
+                               r"\g<1>" + target + r"\g<2>", rels)
+                rel_map[rid] = (rel_type, target)
+                repaired.append({"kind": ref_kind, "rid": rid, "target": target,
+                                 "was": entry[1]})
+
+    if repaired:
+        parts[rels_name] = rels.encode("utf-8")
+        docx_path.write_bytes(_zip_parts(parts))
+    return {"repaired": repaired, "skipped": skipped}
+
+
+def _zip_parts(parts: dict[str, bytes]) -> bytes:
+    """Deterministic zip: fixed timestamps and fixed core.xml dates, so the
+    artifact hash is reproducible across builds (PF-B4 snapshot comparability)."""
+    import io
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for name in sorted(parts):
+            payload = parts[name]
+            if name == "docProps/core.xml":
+                text = payload.decode("utf-8")
+                text = re.sub(r"(<dcterms:created[^>]*>)[^<]*(</dcterms:created>)",
+                               r"\g<1>1980-01-01T00:00:00Z\g<2>", text)
+                text = re.sub(r"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)",
+                               r"\g<1>1980-01-01T00:00:00Z\g<2>", text)
+                payload = text.encode("utf-8")
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            dst.writestr(info, payload)
+    return out.getvalue()
+
+
 def _inject_paper_title_header(docx_path: Path, title: str) -> None:
     """Replace the {{PAPER_TITLE}} placeholder left by the refdoc header part."""
     import io
     src = zipfile.ZipFile(docx_path)
-    out = io.BytesIO()
+    parts = {n: src.read(n) for n in src.namelist()}
     replaced = False
     escaped = _xml_escape_text(title).encode("utf-8")
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
-        for name in src.namelist():
-            payload = src.read(name)
-            if re.match(r"word/header\d*\.xml", name) and b"{{PAPER_TITLE}}" in payload:
-                payload = payload.replace(b"{{PAPER_TITLE}}", escaped)
-                replaced = True
-            dst.writestr(name, payload)
+    for name in list(parts):
+        if re.match(r"word/header\d*\.xml", name) and b"{{PAPER_TITLE}}" in parts[name]:
+            parts[name] = parts[name].replace(b"{{PAPER_TITLE}}", escaped)
+            replaced = True
     if replaced:
-        docx_path.write_bytes(out.getvalue())
+        docx_path.write_bytes(_zip_parts(parts))
 
 
 def _cmd_build_docx_impl(args) -> tuple:
@@ -2237,6 +2467,16 @@ def _cmd_build_docx_impl(args) -> tuple:
         return ({"status": "error", "error": f"layout profile resolution failed: {exc}", "stage": "pre-build"}, 2)
     import hashlib
     refdoc_sha = hashlib.sha256(layout["refdoc_path"].read_bytes()).hexdigest()[:16]
+    # PF-B11: the reference docx is GENERATED from the profile. A checked-in
+    # refdoc that no longer matches its profile would silently produce the wrong
+    # layout, so the build regenerates it and compares byte for byte.
+    refdoc_sync = _assert_refdoc_in_sync(layout["profile_name"], layout["refdoc_path"])
+    if not refdoc_sync["in_sync"]:
+        return ({"status": "error",
+                 "error": ("reference docx is out of sync with its profile — regenerate "
+                           "with `python3 -I tools/make_refdoc.py` and review the diff "
+                           f"(profile={layout['profile_name']}, refdoc={refdoc_sync['refdoc']})"),
+                 "stage": "pre-build", "refdoc_sync": refdoc_sync}, 2)
 
     version = _norm_version(info["version"])
     title = info["title"] if info["title"] != "(untitled)" else paper_cfg.get("title") or "未命名稿件"
@@ -2262,17 +2502,29 @@ def _cmd_build_docx_impl(args) -> tuple:
         ]
         if title_en:
             cmd += ["--metadata", f"subtitle={title_en}"]
-        authors = [a.get("name") for a in (paper_cfg.get("authors") or []) if a.get("name")]
-        if authors:
-            cmd += ["--metadata", "author=" + "，".join(authors)]
+        # NOTE: author line is NOT injected from paper.yaml — the authoritative author
+        # line (S2 inline affiliation + S18 corresponding-author *) lives in
+        # body/paper.md front matter; duplicating it here produced a second,
+        # marker-less author line (PF-B6 visual round 2026-11-11).
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0 or not output_file.exists():
             return ({"status": "error", "error": result.stderr.strip() or "pandoc failed", "stderr": result.stderr[:500]}, 1)
 
         _inject_paper_title_header(output_file, title)
+        # pandoc copies the header/footer parts but not their relationships;
+        # close the graph so the delivered docx is a valid package.
+        hf_repair = _repair_header_footer_relationships(output_file)
+        # pandoc drops m:mathPr from the reference settings.xml; re-apply it so the
+        # profile's math font actually reaches the document.
+        math_font = (layout["role"].get("fonts", {}).get("math") or (None, None))[1]
+        math_applied = _apply_math_font_to_output(output_file, math_font)
+        table_rows_hardened = _harden_tables(output_file)
 
         # ── profile-landing assertions (hard fail; no silent degradation) ──
         failures, layout_notes = _assert_layout_landing(output_file, layout["role"], layout["merged"])
+        layout_notes.append({"check": "table_rows_cantsplit_tblheader", "value": table_rows_hardened})
+        layout_notes.append({"check": "math_font_declared", "value": math_font if math_applied else None})
+        layout_notes.append({"check": "header_footer_relationship_repair", "value": hf_repair})
 
         # ── content-compliance assertion: equations must be OMML, not images (S9) ──
         source_text = body_source.read_text(encoding="utf-8")
@@ -2371,12 +2623,28 @@ def cmd_build_pdf(args):
                 manifest["artifacts"].append({"format": "pdf", "path": str(pdf_path.relative_to(dest)), "sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest()[:16], "size": pdf_path.stat().st_size})
                 # PDF font inventory: declared profile fonts vs actually embedded (LibreOffice
                 # substitutions are recorded here, never silent — PF-B3 no-silent-degradation)
+                fonts_verifiable = True
                 try:
                     pf = subprocess.run(["pdffonts", str(pdf_path)], capture_output=True, text=True, timeout=30)
                     if pf.returncode == 0:
                         pdf_fonts = [ln.split()[0] for ln in pf.stdout.splitlines()[2:] if ln.strip()]
+                    else:
+                        pdf_fonts = []
+                        fonts_verifiable = False
                 except (FileNotFoundError, subprocess.TimeoutExpired):
-                    pdf_fonts = ["(pdffonts unavailable)"]
+                    pdf_fonts = []
+                    fonts_verifiable = False
+                if not fonts_verifiable:
+                    # An unverifiable PDF must not pass the build: PF-B12 forbids a
+                    # silent pass on something that could not be checked.
+                    manifest.setdefault("limitations", []).append(
+                        {"kind": "font_inventory_unavailable",
+                         "detail": "pdffonts could not be run; embedded fonts could not be verified"})
+                    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                    return ({"status": "error",
+                             "error": "PDF font inventory could not be produced (pdffonts unavailable) — "
+                                      "the PDF cannot be verified and must not be published",
+                             "stage": "pdf-verify", "pdf_path": str(pdf_path)}, 1)
                 manifest.setdefault("layout", {})["pdf_fonts_embedded"] = sorted(set(pdf_fonts))
                 # PF-B12: every profile font family must be present in the PDF, either as
                 # itself or through a declared substitution. A missing family is recorded

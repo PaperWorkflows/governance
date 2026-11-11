@@ -374,27 +374,51 @@ def _run_props_xml(latin: str, east_asia: str, pt: float) -> str:
             f'w:eastAsia="{east_asia}"/><w:sz w:val="{hp}"/><w:szCs w:val="{hp}"/></w:rPr>')
 
 
-def _footer_xml(latin: str, east_asia: str, pt: float) -> bytes:
+_PAGE_FIELD_XML = (
+    '<w:r>{rp}<w:fldChar w:fldCharType="begin"/></w:r>'
+    '<w:r>{rp}<w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
+    '<w:r>{rp}<w:fldChar w:fldCharType="end"/></w:r>'
+)
+
+# Page-number placement per pagination.page_number_position. "none" means the
+# part is not created at all; the value must agree with the schema enum.
+_PAGE_FIELD_ALIGN = {
+    "footer_center": ("w:ftr", "center"),
+    "footer_right": ("w:ftr", "right"),
+    "header_right": ("w:hdr", "right"),
+}
+
+
+def _page_field_part(kind: str, align: str, latin: str, east_asia: str, pt: float) -> bytes:
     rp = _run_props_xml(latin, east_asia, pt)
     xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        f'<w:ftr xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
-        '<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>'
-        f'<w:r>{rp}<w:fldChar w:fldCharType="begin"/></w:r>'
-        f'<w:r>{rp}<w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
-        f'<w:r>{rp}<w:fldChar w:fldCharType="end"/></w:r>'
-        "</w:p></w:ftr>"
+        f'<{kind} xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
+        f'<w:p><w:pPr><w:pStyle w:val="{"Footer" if kind == "w:ftr" else "Header"}"/>'
+        f'<w:jc w:val="{align}"/></w:pPr>'
+        + _PAGE_FIELD_XML.format(rp=rp)
+        + "</w:p></"
+        + kind
+        + ">"
     )
     return xml.encode("utf-8")
 
 
-def _header_xml(latin: str, east_asia: str, pt: float) -> bytes:
+def _footer_xml(latin: str, east_asia: str, pt: float, position: str = "footer_center") -> bytes:
+    kind, align = _PAGE_FIELD_ALIGN.get(position, ("w:ftr", "center"))
+    return _page_field_part(kind, align, latin, east_asia, pt)
+
+
+def _header_xml(latin: str, east_asia: str, pt: float, mode: str = "title_center") -> bytes:
+    """Running head. `title_center` carries the paper title (replaced at build
+    time); `journal` carries a venue/label placeholder."""
     rp = _run_props_xml(latin, east_asia, pt)
+    text = "{{PAPER_TITLE}}" if mode != "journal" else "{{JOURNAL_LABEL}}"
     xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         f'<w:hdr xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
         '<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="center"/></w:pPr>'
-        f'<w:r>{rp}<w:t>{{{{PAPER_TITLE}}}}</w:t></w:r>'
+        f'<w:r>{rp}<w:t>{text}</w:t></w:r>'
         "</w:p></w:hdr>"
     )
     return xml.encode("utf-8")
@@ -416,7 +440,15 @@ def _header_footer_styles(styles: str, header_pt: float, page_pt: float) -> str:
 
 # ------------------------------------------------------------------ section/doc
 
-def _apply_section(doc_xml: str, page_cfg: dict) -> str:
+def _apply_section(doc_xml: str, page_cfg: dict, refs: dict[str, str]) -> str:
+    """Rewrite the section properties.
+
+    `refs` maps "header"/"footer" to a relationship id, and contains only the
+    parts that were actually created. Emitting a reference to a part that does
+    not exist (or has no relationship) yields a package whose relationship graph
+    is not closed — LibreOffice/Word then refuse to open it. Hence the references
+    are driven by what was created, never by a fixed constant.
+    """
     size = page_cfg.get("size", "A4")
     w_mm, h_mm = PAGE_SIZES.get(size, PAGE_SIZES["A4"])
     margin = page_cfg.get("margin", {}) or {}
@@ -424,17 +456,23 @@ def _apply_section(doc_xml: str, page_cfg: dict) -> str:
     def tw(mm: float) -> int:
         return int(round(mm * MM_TO_TWIPS))
 
+    head = ""
+    if refs.get("header"):
+        head += f'<w:headerReference w:type="default" r:id="{refs["header"]}"/>'
+    if refs.get("footer"):
+        head += f'<w:footerReference w:type="default" r:id="{refs["footer"]}"/>'
+
     sect = (
         "<w:sectPr>"
-        f'<w:headerReference w:type="default" r:id="{HEADER_RID}"/>'
-        f'<w:footerReference w:type="default" r:id="{FOOTER_RID}"/>'
-        '<w:footnotePr><w:numRestart w:val="eachSect"/></w:footnotePr>'
+        + head
+        + '<w:footnotePr><w:numRestart w:val="eachSect"/></w:footnotePr>'
         f'<w:pgSz w:w="{tw(w_mm)}" w:h="{tw(h_mm)}"/>'
         f'<w:pgMar w:top="{tw(margin.get("top", 25.4))}" w:bottom="{tw(margin.get("bottom", 25.4))}" '
         f'w:left="{tw(margin.get("left", 25.4))}" w:right="{tw(margin.get("right", 25.4))}" '
         'w:header="720" w:footer="720" w:gutter="0"/>'
         '<w:cols w:space="425"/>'
-        '<w:docGrid w:linePitch="312"/>'
+        # docGrid removed: grid snapping inflated CJK advance widths (9pt rendered
+        # ~9.7pt pitch), breaking size verification (PF-B12, 2026-11-11)
         "</w:sectPr>"
     )
     span = _find_element(doc_xml, "w:sectPr")
@@ -480,9 +518,70 @@ def _apply_doc_defaults(styles: str, role: dict) -> str:
 
 # --------------------------------------------------------------- package plumbing
 
+def _apply_math_font(settings_xml: str, math_font: str | None) -> str:
+    """Set the OMML math font in settings.xml (m:mathPr/m:mathFont).
+
+    Word renders equations with the math font declared here; without it the
+    formulas fall back to the body's Latin font. pandoc emits <m:oMath> without
+    per-run fonts, so this is the only place the math font can be applied.
+    """
+    if not math_font:
+        return settings_xml
+    m = re.search(r"<m:mathPr\b.*?</m:mathPr>", settings_xml, re.S)
+    if m:
+        inner = m.group(0)
+        if "m:mathFont" in inner:
+            new_inner = re.sub(r"<m:mathFont\b[^>]*/>",
+                               f'<m:mathFont m:val="{math_font}" />', inner)
+        else:
+            new_inner = inner.replace("<m:mathPr>", f'<m:mathPr><m:mathFont m:val="{math_font}" />')
+        return settings_xml[:m.start()] + new_inner + settings_xml[m.end():]
+    frag = f'<m:mathPr><m:mathFont m:val="{math_font}" /></m:mathPr>'
+    idx = settings_xml.rindex("</w:settings>")
+    return settings_xml[:idx] + frag + settings_xml[idx:]
+
+
+def _assert_relationship_closure(doc_xml: str, rels: str, parts: dict[str, bytes]) -> None:
+    """Every header/footer reference in sectPr must resolve to a relationship of
+    the matching type whose target part exists. A dangling reference produces a
+    package that LibreOffice/Word refuse to open."""
+    rel_map = {}
+    for m in re.finditer(r'<Relationship Type="([^"]+)" Id="([^"]+)" Target="([^"]+)"', rels):
+        rel_map[m.group(2)] = (m.group(1), m.group(3))
+    for ref_kind, tag in (("header", "w:headerReference"), ("footer", "w:footerReference")):
+        for m in re.finditer(r"<" + tag + r'\b[^>]*r:id="([^"]+)"', doc_xml):
+            rid = m.group(1)
+            if rid not in rel_map:
+                raise layoutlib.LayoutError(
+                    f"sectPr {tag} points at {rid}, which has no relationship")
+            rel_type, target = rel_map[rid]
+            if not rel_type.endswith("/" + ref_kind):
+                raise layoutlib.LayoutError(
+                    f"sectPr {tag} points at {rid} whose relationship type is {rel_type!r}, "
+                    f"expected a {ref_kind} relationship")
+            part = "word/" + target.lstrip("/")
+            if part not in parts:
+                raise layoutlib.LayoutError(
+                    f"sectPr {tag} points at {rid} -> {part}, which is not in the package")
+
+
+def _next_rid(rels: str) -> str:
+    """First unused rIdNNN in the document relationships (never assume a fixed id)."""
+    used = {int(m) for m in re.findall(r'Id="rId(\d+)"', rels)}
+    n = 1
+    while n in used:
+        n += 1
+    return f"rId{n}"
+
+
 def _add_relationship(rels: str, rid: str, rel_type: str, target: str) -> str:
+    """Add a relationship. An occupied Id is an error, never a silent skip —
+    a silent skip leaves sectPr pointing at an unrelated part."""
     if f'Id="{rid}"' in rels:
-        return rels
+        raise layoutlib.LayoutError(
+            f"relationship Id {rid} already exists; refusing to reuse it "
+            f"(it would point sectPr at an unrelated part)"
+        )
     rel = (f'<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/'
            f'relationships/{rel_type}" Id="{rid}" Target="{target}" />')
     idx = rels.rindex("</Relationships>")
@@ -559,6 +658,12 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
                            rpr={"fonts": f["title"], "size_pt": s.get("title_en"), "black": True},
                            ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
                                 "space_before_pt": 0, "space_after_pt": 12, "keep_with_next": True})
+    # linked character styles carry the same face; they also hold pandoc's default
+    # blue heading colour and theme fonts, which must not survive into a paper.
+    styles = _patch_style(styles, "TitleChar",
+                           rpr={"fonts": f["title"], "size_pt": s.get("title_zh"), "black": True})
+    styles = _patch_style(styles, "SubtitleChar",
+                           rpr={"fonts": f["title"], "size_pt": s.get("title_en"), "black": True})
     styles = _patch_style(styles, "Author",
                            rpr={"fonts": f["author"], "size_pt": s.get("author"), "black": True},
                            ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
@@ -571,7 +676,9 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
     styles = _patch_style(styles, "Abstract",
                            rpr={"fonts": f["abstract"], "size_pt": s.get("abstract"), "black": True},
                            ppr={"align": "both", "first_line_chars": 0, "first_line_pt": 0,
-                                "space_before_pt": 0, "space_after_pt": 6})
+                                "space_before_pt": 0, "space_after_pt": 6,
+                                "keep_with_next": False})  # break keepNext chain: abstract body must not
+                                   # drag keywords/intro to the next page (PF-B6 round 2, 2026-11-11)
 
     heading_space = {1: (12, 6), 2: (6, 3), 3: (6, 3), 4: (3, 0), 5: (3, 0)}
     for level in range(1, 6):
@@ -623,22 +730,43 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
     styles = _header_footer_styles(styles, s.get("header") or 9, s.get("page_number") or 7.5)
     latin_body = f["body"][1] or "Times New Roman"
     east_body = f["body"][0] or "宋体"
-    if pagination.get("page_number_position", "footer_center") != "none":
-        parts["word/footer1.xml"] = _footer_xml(latin_body, east_body, s.get("page_number") or 7.5)
-        rels = _add_relationship(rels, FOOTER_RID, "footer", "footer1.xml")
-        ctypes = _add_content_type(ctypes, "word/footer1.xml", "footer")
-    if pagination.get("header", "title_center") != "none":
-        parts["word/header1.xml"] = _header_xml(latin_body, east_body, s.get("header") or 9)
-        rels = _add_relationship(rels, HEADER_RID, "header", "header1.xml")
+    refs: dict[str, str] = {}
+    page_pos = pagination.get("page_number_position", "footer_center")
+    header_mode = pagination.get("header", "title_center")
+    if page_pos != "none":
+        kind, _align = _PAGE_FIELD_ALIGN.get(page_pos, ("w:ftr", "center"))
+        part_name = "word/footer1.xml" if kind == "w:ftr" else "word/header1.xml"
+        rel_kind = "footer" if kind == "w:ftr" else "header"
+        parts[part_name] = _page_field_part(kind, _align, latin_body, east_body,
+                                            s.get("page_number") or 7.5)
+        rid = _next_rid(rels)
+        rels = _add_relationship(rels, rid, rel_kind, part_name.split("/", 1)[1])
+        ctypes = _add_content_type(ctypes, part_name, rel_kind)
+        refs["footer" if kind == "w:ftr" else "header"] = rid
+    if header_mode != "none":
+        parts["word/header1.xml"] = _header_xml(latin_body, east_body, s.get("header") or 9, header_mode)
+        rid = _next_rid(rels)
+        rels = _add_relationship(rels, rid, "header", "header1.xml")
         ctypes = _add_content_type(ctypes, "word/header1.xml", "header")
+        refs["header"] = rid
 
-    # 5. section geometry
-    doc_xml = _apply_section(doc_xml, role["page"])
+    # 5. section geometry — references only the parts that were actually created
+    doc_xml = _apply_section(doc_xml, role["page"], refs)
+
+    # 5b. relationship closure: every header/footer reference must resolve to a
+    # relationship of the right type whose target part exists in the package.
+    _assert_relationship_closure(doc_xml, rels, parts)
 
     parts["word/styles.xml"] = styles.encode("utf-8")
     parts["word/document.xml"] = doc_xml.encode("utf-8")
     parts["word/_rels/document.xml.rels"] = rels.encode("utf-8")
     parts["[Content_Types].xml"] = ctypes.encode("utf-8")
+    # OMML math font: pandoc emits <m:oMath> without per-run fonts, so the only
+    # place the math font can be applied is settings.xml / m:mathPr / m:mathFont.
+    if "word/settings.xml" in parts:
+        parts["word/settings.xml"] = _apply_math_font(
+            parts["word/settings.xml"].decode("utf-8"),
+            (role["fonts"].get("math") or (None, None))[1]).encode("utf-8")
 
     data = _deterministic_zip(parts)
     checks = self_check(data, role)
@@ -675,25 +803,58 @@ def self_check(data: bytes, role: dict) -> dict:
     checks["page_mm_expected"] = list(PAGE_SIZES.get(role["page"].get("size", "A4"), PAGE_SIZES["A4"]))
     m = re.search(r'<w:pgMar [^>]*w:top="(\d+)"[^>]*w:bottom="(\d+)"[^>]*w:left="(\d+)"[^>]*w:right="(\d+)"', docxml)
     checks["margins_mm"] = [round(int(m.group(i)) / MM_TO_TWIPS, 1) for i in range(1, 5)] if m else None
-    checks["no_blue_headings"] = "0F4761" not in styles
+    checks["no_blue_headings"] = not layoutlib.blue_colour_present(styles)
     footer_parts = [n for n in names if re.match(r"word/footer\d*\.xml", n)]
     checks["footer_page_field"] = any("PAGE" in z.read(n).decode("utf-8", "ignore") for n in footer_parts)
     checks["header_placeholder"] = any("{{PAPER_TITLE}}" in z.read(n).decode("utf-8", "ignore")
                                        for n in names if re.match(r"word/header\d*\.xml", n))
     tbl = style_block("Table")
-    checks["table_three_line"] = "tblBorders" in tbl and tbl.count('w:val="single"') >= 2
+    checks["table_three_line"] = layoutlib.three_line_table_ok(tbl)
+    # fonts must be explicit, not theme-resolved
+    m = re.search(r'w:eastAsia="([^"]+)"', normal)
+    checks["normal_east_asia_font"] = m.group(1) if m else None
+    checks["normal_east_asia_font_expected"] = role["fonts"]["body"][0] or None
+    m = re.search(r'w:ascii="([^"]+)"', normal)
+    checks["normal_latin_font"] = m.group(1) if m else None
+    checks["normal_latin_font_expected"] = role["fonts"]["body"][1] or None
+    # the page-number field must be an exact PAGE token, not NUMPAGES/SECTIONPAGES
+    checks["footer_page_field"] = any(
+        layoutlib.has_exact_page_field(z.read(n).decode("utf-8", "ignore"))
+        for n in names if re.match(r"word/(header|footer)\d*\.xml", n))
+    checks["header_placeholder"] = any(("{{PAPER_TITLE}}" in z.read(n).decode("utf-8", "ignore")
+                                        or "{{JOURNAL_LABEL}}" in z.read(n).decode("utf-8", "ignore"))
+                                       for n in names if re.match(r"word/header\d*\.xml", n))
+    # every header/footer reference must resolve
+    rels_xml = z.read("word/_rels/document.xml.rels").decode("utf-8")
+    rel_map = {m.group(2): m.group(3) for m in
+               re.finditer(r'<Relationship Type="([^"]+)" Id="([^"]+)" Target="([^"]+)"', rels_xml)}
+    refs_ok = True
+    for m in re.finditer(r'<w:(header|footer)Reference[^>]*r:id="([^"]+)"', docxml):
+        target = rel_map.get(m.group(2))
+        refs_ok = refs_ok and target is not None and ("word/" + target) in names
+    checks["header_footer_refs_resolve"] = refs_ok
+
+    margins_expected = [round(float((role["page"].get("margin") or {}).get(side, 25.4)), 1)
+                        for side in ("top", "bottom", "left", "right")]
 
     ok = (
         checks["title_pt"] == checks["title_pt_expected"]
         and checks["heading1_pt"] == checks["heading1_pt_expected"]
         and checks["normal_first_line_chars"] == checks["normal_first_line_chars_expected"]
         and checks["page_mm"] == checks["page_mm_expected"]
-        and checks["margins_mm"] == [25.4, 25.4, 25.4, 25.4]
+        and checks["margins_mm"] == margins_expected
         and checks["no_blue_headings"]
         and checks["footer_page_field"]
         and checks["header_placeholder"]
+        and checks["table_three_line"]
+        and checks["normal_east_asia_font"] == checks["normal_east_asia_font_expected"]
+        and checks["normal_latin_font"] == checks["normal_latin_font_expected"]
+        and checks["header_footer_refs_resolve"]
     )
     return {"checks": checks, "pass": bool(ok)}
+
+
+
 
 
 def main() -> int:

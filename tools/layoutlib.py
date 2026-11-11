@@ -32,6 +32,11 @@ STRUCTURE_IDENTITY_KEYS = ("page", "citation", "formulas", "target_venue")
 # venue decision; letting a paper silently override it would bypass the profile.
 L2_ALLOWED_KEYS = ("profile", "kind", "typography")
 
+# PF-B13 further limits WHICH typography keys a paper may override: the venue owns
+# the role table (fonts / sizes / heading_numbering); a paper may only change the
+# body size, the line spacing and the first-line indent.
+L2_ALLOWED_TYPOGRAPHY_KEYS = ("body_pt", "line_spacing", "first_line_indent_chars")
+
 L0_PROFILE = "draft"
 
 
@@ -97,6 +102,15 @@ def check_l2_overrides(l2: dict) -> None:
                 f"punctuation/author_bio_layout) must be changed in the venue profile, "
                 f"which requires profile versioning."
             )
+    typography = l2.get("typography") or {}
+    for key in typography:
+        if key not in L2_ALLOWED_TYPOGRAPHY_KEYS:
+            raise LayoutError(
+                f"L2 may only override {list(L2_ALLOWED_TYPOGRAPHY_KEYS)} (PF-B13); "
+                f"found 'typography.{key}'. The role table (fonts / sizes / "
+                f"heading_numbering) is a venue decision and must be changed in the "
+                f"venue profile, which requires profile versioning."
+            )
     if l2.get("kind") not in (None, "paper"):
         raise LayoutError(f"L2 profile kind must be 'paper', got: {l2.get('kind')!r}")
 
@@ -155,6 +169,124 @@ def refdoc_path(entry: dict) -> Path:
             f"(silent fallback to pandoc defaults is forbidden per PF-B3)"
         )
     return path
+
+
+# ---------------------------------------------------------------------------
+# Shared OOXML checks. Used by tools/make_refdoc.py (self-check) and
+# tools/paper.py (build-time landing assertions) so the two cannot drift.
+# ---------------------------------------------------------------------------
+
+# pandoc's factory reference doc paints headings in accent1 (#0F4761) and other
+# theme colours. None of them may survive into a paper.
+_BLUE_HEXES = ("0f4761", "156082", "4472c4", "1f4e79", "2e74b5")
+
+
+def blue_colour_present(*xml_texts: str) -> bool:
+    """True when any theme/accent heading colour is still present.
+
+    Checks the literal hex (case-insensitively), the theme colour reference, and
+    scans every supplied part — not only styles.xml.
+    """
+    for text in xml_texts:
+        if not text:
+            continue
+        low = text.lower()
+        if "themecolor=\"accent1\"" in low:
+            return True
+        for hexval in _BLUE_HEXES:
+            if hexval in low:
+                return True
+    return False
+
+
+def has_exact_page_field(xml_text: str) -> bool:
+    """True when the part carries a PAGE field.
+
+    A substring test would also accept NUMPAGES / SECTIONPAGES, which are a
+    different field and must not satisfy the page-number requirement.
+    """
+    import re
+
+    for tok in re.findall(r"<w:instrText[^>]*>([^<]*)</w:instrText>", xml_text):
+        if tok.strip() == "PAGE":
+            return True
+    return False
+
+
+def three_line_table_ok(table_style_block: str) -> bool:
+    """True for a three-line table style.
+
+    Requires top/bottom single, left/right/insideH/insideV none, and exactly one
+    single rule in the firstRow conditional format (the header separator).
+    A full grid table must NOT satisfy this.
+    """
+    import re
+
+    borders = re.search(r"<w:tblBorders>(.*?)</w:tblBorders>", table_style_block, re.S)
+    if not borders:
+        return False
+    inner = borders.group(1)
+
+    def val(tag: str):
+        m = re.search(r"<" + tag + r'\b[^>]*w:val="([^"]+)"', inner)
+        return m.group(1) if m else None
+
+    if val("w:top") != "single" or val("w:bottom") != "single":
+        return False
+    for tag in ("w:left", "w:right", "w:insideH", "w:insideV"):
+        if val(tag) != "none":
+            return False
+    first_row = re.search(r'<w:tblStylePr w:type="firstRow">(.*?)</w:tblStylePr>',
+                          table_style_block, re.S)
+    if not first_row:
+        return False
+    singles = re.findall(r'<w:(top|bottom|left|right|insideH|insideV)\b[^>]*w:val="single"',
+                         first_row.group(1))
+    return singles == ["bottom"]
+
+
+def effective_line_spacing(styles_xml: str) -> int | None:
+    """The line spacing actually in force (w:line, 1/240 of a line).
+
+    Normal may define it directly or inherit it from docDefaults; the effective
+    value is Normal's when present, otherwise docDefaults'.
+    """
+    import re
+
+    spacing_re = r'<w:spacing[^>]*w:line="(\d+)"[^>]*w:lineRule="auto"'
+    normal = re.search(r'<w:style [^>]*w:styleId="Normal"[^>]*>.*?</w:style>', styles_xml, re.S)
+    m = re.search(spacing_re, normal.group(0)) if normal else None
+    if m:
+        return int(m.group(1))
+    dd = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles_xml, re.S)
+    m = re.search(spacing_re, dd.group(0)) if dd else None
+    return int(m.group(1)) if m else None
+
+
+def apply_math_font(settings_xml: str, math_font: str | None) -> str:
+    """Set the OMML math font in settings.xml (m:mathPr/m:mathFont).
+
+    Word renders equations with the math font declared here. pandoc emits
+    <m:oMath> without per-run fonts AND drops m:mathPr from the reference
+    document's settings.xml, so the declaration must be re-applied to the
+    produced document as well.
+    """
+    import re
+
+    if not math_font:
+        return settings_xml
+    m = re.search(r"<m:mathPr\b.*?</m:mathPr>", settings_xml, re.S)
+    if m:
+        inner = m.group(0)
+        if "m:mathFont" in inner:
+            new_inner = re.sub(r"<m:mathFont\b[^>]*/>",
+                               f'<m:mathFont m:val="{math_font}" />', inner)
+        else:
+            new_inner = inner.replace("<m:mathPr>", f'<m:mathPr><m:mathFont m:val="{math_font}" />')
+        return settings_xml[:m.start()] + new_inner + settings_xml[m.end():]
+    frag = f'<m:mathPr><m:mathFont m:val="{math_font}" /></m:mathPr>'
+    idx = settings_xml.rindex("</w:settings>")
+    return settings_xml[:idx] + frag + settings_xml[idx:]
 
 
 def merged_role(merged: dict) -> dict:

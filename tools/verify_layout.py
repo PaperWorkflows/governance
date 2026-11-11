@@ -118,6 +118,26 @@ def section_c() -> None:
     record("C. refdoc generator idempotency + self-check", ok, "; ".join(detail))
 
 
+
+def _grid_table(styles: bytes) -> bytes:
+    """Turn the three-line table into a full grid table (all rules single)."""
+    import re as _re
+    text = styles.decode("utf-8")
+
+    def to_single(m):
+        tag = m.group(1)
+        return (f'<w:{tag} w:val="single" w:sz="4" w:space="0" w:color="000000" />')
+
+    m = _re.search(r"<w:tblBorders>.*?</w:tblBorders>", text, _re.S)
+    if not m:
+        raise AssertionError("no <w:tblBorders> in the produced styles.xml")
+    block = m.group(0)
+    new_block = _re.sub(r"<w:(left|right|insideH|insideV)\b[^>]*?/>", to_single, block)
+    if new_block == block:
+        raise AssertionError("grid mutation did not change the border block")
+    return (text[:m.start()] + new_block + text[m.end():]).encode("utf-8")
+
+
 def _current_docx(paper_root: pathlib.Path) -> list[pathlib.Path]:
     """The newest built docx per paper (build/<version>/ holds superseded versions)."""
     out: list[pathlib.Path] = []
@@ -154,26 +174,59 @@ def section_d(paper_root: pathlib.Path) -> None:
     stack = layoutlib.resolve_profile_stack("stie")
     role = layoutlib.merged_role(stack["merged"])
     merged = stack["merged"]
-    tmp = pathlib.Path("/tmp/verify_layout_negative")
-    tmp.mkdir(exist_ok=True)
+    import tempfile
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="verify_layout_neg_"))
+
+    def _replace(payload: bytes, old: bytes, new: bytes) -> bytes:
+        if old not in payload:
+            raise AssertionError(f"mutation target not found: {old[:60]!r}")
+        return payload.replace(old, new)
 
     mutations = {
         "line_spacing_removed": lambda p: p.__setitem__(
             "word/styles.xml",
-            p["word/styles.xml"].replace(b'w:line="360" w:lineRule="auto"', b'w:line="240" w:lineRule="auto"')),
+            _replace(p["word/styles.xml"], b'w:line="360" w:lineRule="auto"',
+                     b'w:line="240" w:lineRule="auto"')),
         "page_size_removed": lambda p: p.__setitem__(
             "word/document.xml",
-            p["word/document.xml"].replace(b'<w:pgSz w:h="16838" w:w="11906" />', b"")),
+            _replace(p["word/document.xml"], b'<w:pgSz w:h="16838" w:w="11906" />', b"")),
         "margins_removed": lambda p: p.__setitem__(
             "word/document.xml",
-            p["word/document.xml"].replace(b'w:top="1440"', b'w:top="720"')),
+            _replace(p["word/document.xml"], b'w:top="1440"', b'w:top="720"')),
         "cjk_font_removed": lambda p: p.__setitem__(
             "word/styles.xml",
-            p["word/styles.xml"].replace('w:eastAsia="宋体"'.encode("utf-8"), b'w:eastAsia="Calibri"')),
+            _replace(p["word/styles.xml"], 'w:eastAsia="宋体"'.encode("utf-8"),
+                     b'w:eastAsia="Calibri"')),
+        # first-line indent removed (the profile demands 2 characters)
+        "indent_removed": lambda p: p.__setitem__(
+            "word/styles.xml",
+            _replace(p["word/styles.xml"], b'w:firstLineChars="200" ', b"")),
+        # a GRID table must not satisfy the three-line rule. The attribute order
+        # in the produced file is whatever pandoc's serialiser emits, so the
+        # mutation is regex-based rather than a literal match.
+        "grid_table": lambda p: p.__setitem__(
+            "word/styles.xml",
+            _grid_table(p["word/styles.xml"])),
+        # NUMPAGES is not PAGE
+        "numpages_not_page": lambda p: p.__setitem__(
+            "word/footer1.xml",
+            _replace(p["word/footer1.xml"], b" PAGE ", b" NUMPAGES ")),
+        # the running head must actually be referenced by sectPr
+        "header_reference_removed": lambda p: p.__setitem__(
+            "word/document.xml",
+            _replace(p["word/document.xml"], b'<w:headerReference r:id="rId10" w:type="default" />', b"")),
+        # blue heading colour in lower case (case-insensitive detection)
+        "blue_lowercase": lambda p: p.__setitem__(
+            "word/styles.xml",
+            _replace(p["word/styles.xml"], b'w:val="000000"', b'w:val="0f4761"')),
     }
     for label, mutate in mutations.items():
         target = tmp / f"{label}.docx"
-        _mutate_docx(docx, target, mutate)
+        try:
+            _mutate_docx(docx, target, mutate)
+        except AssertionError as exc:
+            record(f"D. negative: {label} must fail assertions", False, f"mutation no-op: {exc}")
+            continue
         failures, _notes = paper_mod._assert_layout_landing(target, role, merged)
         record(f"D. negative: {label} must fail assertions", bool(failures),
                f"{len(failures)} failure(s): " + "; ".join(f["check"] for f in failures[:3]))
@@ -184,6 +237,7 @@ def section_d(paper_root: pathlib.Path) -> None:
 
 
 def section_e(paper_root: pathlib.Path) -> None:
+    import tempfile
     import importlib.util
     spec = importlib.util.spec_from_file_location("paper_mod2", TOOLS_DIR / "paper.py")
     paper_mod = importlib.util.module_from_spec(spec)
@@ -196,8 +250,7 @@ def section_e(paper_root: pathlib.Path) -> None:
         return
     docx = docs[0]
     nasty = 'A & B <研究> "x" \\z'
-    tmp = pathlib.Path("/tmp/verify_layout_negative/escaped.docx")
-    tmp.parent.mkdir(exist_ok=True)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="verify_layout_esc_")) / "escaped.docx"
     tmp.write_bytes(docx.read_bytes())
     paper_mod._inject_paper_title_header(tmp, nasty)
     z = zipfile.ZipFile(tmp)

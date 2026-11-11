@@ -215,3 +215,23 @@
 ---
 
 *GC-2026-1111-02。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B3/PF-B10/PF-B11–PF-B14；验证入口 tools/verify_layout.py。*
+
+---
+
+## 附二：构建后视觉验收回归修订（2026-11-11，P5 首走新链路三轮视觉验收沉淀）
+
+P5 v0.4.0 构建经 PF-B6 三轮视觉验收（R1 13 页 fail → R2 5 页 fail → R3 18/18 pass）暴露并修复以下工具/样式级缺陷：
+
+| # | 文件 | 修订 | 依据 |
+|---|---|---|---|
+| 1 | `tools/paper.py` | 移除 pandoc metadata author 注入（与 paper.md 权威作者行重复且丢失 S18 通信作者 * 标记） | R1 page-01 |
+| 2 | `tools/paper.py` | 新增 `_harden_tables` 构建后处理：全部表格行 cantSplit + 首行 tblHeader 跨页重复（承接旧手工管线 P2 REL-0002 实践），行数入 manifest 断言注记 | R1 表 3/4 拦腰截断 |
+| 3 | `tools/make_refdoc.py` | Abstract 样式显式 keepNext=false（pandoc 基础样式继承的 keepNext 造成"摘要体→关键词→引言"整链跳页、首页 1/3 空白） | R2 page-01 |
+| 4 | `tools/make_refdoc.py` | sectPr 移除 docGrid（网格吸附使 CJK advance 虚增 ~7%，破坏字号核验与视觉判读） | R2 实测 页眉 9.0pt 标定 vs 文献 9.67pt 假象 |
+| 5 | refdoc ×3 重新生成 | 随 3/4 确定性再生成（diff 即上述样式变化） | — |
+
+**写作侧配套约定**（由 P5 落位、后续论文沿用，精修 PL13 核对项）：摘要/关键词区用 `custom-style` Div（AbstractTitle/Abstract）、表题 TableCaption、图题 ImageCaption、参考文献条目 Bibliography、作者行 Author——pandoc custom-style 是版式角色进入产物的正文侧载体（与 refdoc 样式定义互补）。
+
+**防漂移执行实例**：P5 writing-spec min_chars 曾被并发会话放宽为 null（违反 PF-RV7），已回退并登记（P5 95ada39）。
+
+**验收方法教训（登记）**：CJK 字号像素判读须用纯中文行墨迹高度对同页基准（页眉 9pt），混排行"行宽÷字数"系统性高估 5–8%（ASCII 窄字符摊宽）；docx 层样式+run 覆盖核验为决定性证据。
