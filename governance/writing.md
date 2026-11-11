@@ -84,3 +84,17 @@ This file defines the writing mode execution rules. Writing mode covers: paper b
 - Distinguish model judgment, original verification, independent derivation, actual run, and recalculation. Multiple model agreement does not replace evidence.
 - Conclusions answer the research question without adding unverified capability. Limitations specify assumptions, scope, negative results, and external validity. Future plans are not completed contributions.
 - Work records are separate from body text. After body, evidence, figures, or dependency changes, re-verify affected review items.
+
+### PF-W11 目标刊格式约束
+
+- The target venue's own submission format requirements are binding and are recorded machine-checkably in `writing-spec.yaml` (per-paper, collected from the venue).
+- When the venue is silent, the national-standard baseline (GB/T 7713.2-2022 附录 B, CY/T 170-2019, GB/T 3179-2009) applies; the applicable version of each standard is recorded, not assumed.
+- Venue-specific constraints include, where stated by the venue: title length and punctuation policy, abstract length and writing person, keyword count and separator, bilingual block pairing, funding note order, heading numbering sequence, formula source format and symbol classes, figure/table caption requirements, reference citation system and entry order, corresponding-author marking, and author biography fields.
+- A constraint stated as advisory by the venue ("一般不超过…", "…为宜") is treated as a target with tolerance, not as a hard threshold; the tolerance is recorded.
+- Venue constraints are verified by the review mode (PF-RV7) and by build-time checks where they are mechanically decidable (length, separator, presence of required blocks).
+
+### PF-W12 目标刊优先
+
+- Where a target venue requirement is stricter than the generic rules in this file, the venue requirement governs. The stricter requirement is recorded in `writing-spec.yaml` with its source.
+- Generic rules here still apply where the venue is silent, except where the venue contradicts them; a contradiction must be recorded with both texts and the decision.
+- Changing a venue requirement means re-verifying every affected review item (PF-W10); stale review reports cannot be reused.

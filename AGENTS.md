@@ -19,16 +19,17 @@ This project manages independent academic papers from proposal through publicati
 3. **Writing mode**: Generate paper body from outline and research data. Supports投稿requirements (length, content). Natural human language, academic style, citation management.
 4. **Build mode**: Layout and produce docx and PDF from source, using default or venue-specific templates.
 5. **Review mode**: Automated review流程covering style, wording, and academic standards.
+6. **Polish mode**: Controlled refinement of a written body — logic transitions, wording, terminology constraints, and venue writing-standard compliance — without adding new facts. See `governance/polish.md` (PF-PL1–PF-PL13).
 
 ---
 
 ## F3 Version Management
 
-- Each paper maintains an independent `paper_version` in `paper.yaml` using `major.minor.patch`.
-- Initial draft: `0.1.0`. First accepted release: `1.0.0`.
-  - `major`: research question, core method, or core conclusion changes substantially.
-  - `minor`: core framework holds; new methods, evidence, experiments, or qualified conclusions added.
-  - `patch`: wording, annotations, typesetting, or non-conclusion-affecting corrections.
+- Each paper maintains an independent `paper_version` in `paper.yaml` using SemVer 2.0.0 `vMAJOR.MINOR.PATCH` format.
+- Initial draft: `v0.1.0`. First accepted release: `v1.0.0`.
+  - **MAJOR**: research question, core method, or core conclusion changes substantially.
+  - **MINOR**: core framework holds; new methods, evidence, experiments, or qualified conclusions added.
+  - **PATCH**: wording, annotations, typesetting, or non-conclusion-affecting corrections.
 - Changelog is expressed through commit messages. Higher-order increments reset lower orders.
 
 ---

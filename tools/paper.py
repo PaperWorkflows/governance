@@ -8,9 +8,18 @@ if not sys.flags.isolated:
 
 sys.dont_write_bytecode = True
 
-import argparse, json, re, subprocess, yaml
+import argparse, json, re, subprocess, yaml, zipfile
+import xml.etree.ElementTree
 from pathlib import Path
 from datetime import datetime, timezone
+
+# layoutlib is a sibling module; -I does not prepend the script dir, so insert it explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import layoutlib
+except Exception as _exc:  # pragma: no cover - hard dependency for build subcommands
+    layoutlib = None
+    _layoutlib_error = str(_exc)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PAPER_REPO_PATTERN = re.compile(r'^P([0-9]+)-([A-Z]+)-([0-9]{8})$')
@@ -109,8 +118,9 @@ def validate_paper_yaml(path: Path) -> dict:
     for line in text.splitlines():
         if line.startswith("paper_version:"):
             val = line.split(":", 1)[1].strip()
-            if not re.match(r'^[0-9]+\.[0-9]+\.[0-9]+$', val):
-                errors.append(f"paper_version must be semver: {val}")
+            # SemVer 2.0.0 with v prefix (AGENTS.md F3 / PF-V2 / GC-2026-1111-01-S)
+            if not re.match(r'^v[0-9]+\.[0-9]+\.[0-9]+$', val):
+                errors.append(f"paper_version must be SemVer vMAJOR.MINOR.PATCH (e.g. v0.1.0): {val}")
             break
     if "chapters:" not in text:
         errors.append("Missing required key: chapters")
@@ -609,6 +619,41 @@ def cmd_scaffold(args):
     return emit(result)
 
 # ── check ────────────────────────────────────────────────────────
+
+def cmd_validate(args):
+    """Full JSON Schema validation of paper.yaml (PF-PL1 admission gate ①, machine check).
+
+    Unlike `check` (text-level key/path checks), this runs the actual
+    schemas/paper.schema.json validator including the budget.confirmed
+    conditional branch. Exit code 0 only when the file fully validates.
+    """
+    dest = Path(args.paper) if args.paper else None
+    if not dest:
+        return emit({"status": "error", "error": "--paper required"}, 2)
+    py = dest / "paper.yaml"
+    if not py.exists():
+        return emit({"status": "error", "error": f"paper.yaml not found in {dest}"}, 2)
+    try:
+        import jsonschema
+    except ImportError:
+        return emit({"status": "error", "error": "jsonschema not installed"}), 2
+    schema_path = Path(__file__).resolve().parent.parent / "schemas" / "paper.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    data = yaml.safe_load(py.read_text(encoding="utf-8"))
+    errors = [
+        {"path": "/".join(map(str, e.absolute_path)) or "<root>", "message": e.message[:200]}
+        for e in jsonschema.Draft7Validator(schema).iter_errors(data)
+    ]
+    payload = {
+        "status": "pass" if not errors else "fail",
+        "paper": dest.name,
+        "schema": str(schema_path),
+        "error_count": len(errors),
+        "errors": errors,
+        "note": "PF-PL1 admission gate: polish entry requires status=pass (incl. budget.confirmed branch)",
+    }
+    return emit(payload, 0 if not errors else 1)
+
 
 def cmd_check(args):
     dest = Path(args.paper) if args.paper else None
@@ -1686,7 +1731,9 @@ def cmd_review_debate(args):
     p_scaffold.add_argument("--version", default="0.1.0", help="Initial paper_version (default: 0.1.0)")
 
     p_check = sub.add_parser("check", help="Validate a paper workspace against schema and required paths")
+    p_validate = sub.add_parser("validate", help="Full JSON Schema validation of paper.yaml (PF-PL1 admission gate)")
     p_check.add_argument("--paper", required=True, help="Path to paper workspace directory")
+    p_validate.add_argument("--paper", required=True, help="Path to paper workspace directory")
 
     p_bump = sub.add_parser("version-bump", help="Bump paper_version in paper.yaml")
     p_bump.add_argument("--paper", required=True, help="Path to paper workspace directory")
@@ -1764,6 +1811,7 @@ def cmd_review_debate(args):
         "proposal": cmd_proposal,
         "scaffold": cmd_scaffold,
         "check": cmd_check,
+        "validate": cmd_validate,
         "version-bump": cmd_version_bump,
         "materials": lambda args: {
             "add": cmd_materials_add,
@@ -1885,11 +1933,292 @@ def cmd_build_snapshot(args):
         return emit({"status": "error", "error": f"Failed to write snapshot: {exc}"}, 2)
 
 
-def cmd_build_docx(args):
+def _posix_safe_title(title: str) -> str:
+    """PF-B7 filename rule: POSIX-safe escaping, CJK preserved."""
+    return re.sub(r'[/\\:*?"<>|\s]+', "_", title).strip("_") or "paper"
+
+
+def _norm_version(v: str) -> str:
+    v = (v or "0.1.0").strip()
+    return v if v.startswith("v") else f"v{v}"
+
+
+def _load_paper_yaml(dest: Path) -> dict:
+    """Load paper.yaml. A malformed file is a build failure, not a silent fallback.
+
+    Falling back to {} here would silently downgrade the paper to the L0 draft
+    profile (PF-B11: no silent degradation).
+    """
+    py = dest / "paper.yaml"
+    if not py.exists():
+        return {}
+    try:
+        return yaml.safe_load(py.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise RuntimeError(f"{py} is not valid YAML: {exc}") from None
+
+
+# PDF font families that satisfy a profile font requirement, including the
+# LibreOffice / fontconfig substitutions observed on this build host.
+_FONT_SUBSTITUTIONS = {
+    "宋体": ["SimSun", "NSimSun", "NotoSerifCJKsc", "Songti", "STSong", "SourceHanSerif"],
+    "新宋体": ["NSimSun", "SimSun", "NotoSerifCJKsc", "Songti"],
+    "黑体": ["SimHei", "NotoSansCJKsc", "Heiti", "STHeiti", "SourceHanSans"],
+    "楷体": ["KaiTi", "Kaiti", "NotoSerifCJKsc", "AR PL UKai"],
+    "仿宋": ["FangSong", "Fangsong", "NotoSerifCJKsc"],
+    "Times New Roman": ["TimesNewRoman", "LiberationSerif", "NimbusRoman", "TeX Gyre Termes"],
+    "Cambria Math": ["CambriaMath", "OpenSymbol", "STIXTwoMath", "DejaVuSerif"],
+    "Consolas": ["Consolas", "DejaVuSansMono", "LiberationMono", "Sarasa"],
+}
+
+
+def _profile_font_families(role: dict) -> list[str]:
+    """Distinct font families the profile requires, in a stable order."""
+    out: list[str] = []
+    for _key, pair in (role.get("fonts") or {}).items():
+        for fam in pair:
+            if fam and fam not in out:
+                out.append(fam)
+    return out
+
+
+def _expected_pdf_fonts(layout_block: dict) -> list[str]:
+    """Profile font families that must be present in the built PDF."""
+    out: list[str] = []
+    for family in (layout_block.get("profile_fonts") or []):
+        if family and family not in out:
+            out.append(family)
+    return out
+
+
+def _font_present(family: str, embedded: list[str]) -> bool:
+    """True when the family (or a declared substitution for it) is embedded."""
+    import unicodedata  # noqa: F401  (kept for future normalisation work)
+
+    def norm(s: str) -> str:
+        return "".join(ch for ch in s if ch.isalnum()).lower()
+
+    names = [family] + _FONT_SUBSTITUTIONS.get(family, [])
+    targets = [norm(n) for n in names]
+    for emb in embedded:
+        e = norm(emb.split("+")[-1])  # pdffonts prefixes subset names with ABCDEF+
+        if any(t and (t == e or t in e or e in t) for t in targets):
+            return True
+    return False
+
+
+def _resolve_layout_for_build(dest: Path, paper_cfg: dict) -> dict:
+    """PF-B3/PF-B10: paper.yaml.layout_profile -> registry -> L0->L1->L2 merge.
+
+    Returns {"profile_name", "merged", "role", "override_log", "refdoc_path"}.
+    Raises layoutlib.LayoutError on any failure (build fails, no silent fallback).
+    """
+    if layoutlib is None:
+        raise RuntimeError(f"layoutlib import failed: {_layoutlib_error}")
+    profile_name = paper_cfg.get("layout_profile") or "draft"
+    l2_path = dest / "build" / "layout.yaml"
+    l2 = None
+    if l2_path.exists():
+        l2 = yaml.safe_load(l2_path.read_text(encoding="utf-8"))
+        if not isinstance(l2, dict):
+            raise layoutlib.LayoutError(f"L2 {l2_path} must parse to a mapping")
+    stack = layoutlib.resolve_profile_stack(profile_name, l2)
+    entry = stack["registry_entry"]
+    return {
+        "profile_name": profile_name,
+        "merged": stack["merged"],
+        "role": layoutlib.merged_role(stack["merged"]),
+        "override_log": stack["override_log"],
+        "refdoc_path": layoutlib.refdoc_path(entry),
+    }
+
+
+def _style_block(styles_xml: str, style_id: str) -> str:
+    m = re.search(
+        r'<w:style [^>]*w:styleId="' + re.escape(style_id) + r'"[^>]*>.*?</w:style>',
+        styles_xml, re.S,
+    )
+    return m.group(0) if m else ""
+
+
+def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[list, list]:
+    """Profile-landing assertions on the produced docx (PF-B3 implementation carrier).
+
+    Returns (failures, notes): failures must be empty or the build fails;
+    notes are recorded in the manifest (no silent degradation).
+    """
+    failures, notes = [], []
+    z = zipfile.ZipFile(docx_path)
+    styles = z.read("word/styles.xml").decode("utf-8")
+    docxml = z.read("word/document.xml").decode("utf-8")
+    parts = z.namelist()
+
+    def twips(mm: float) -> int:
+        return int(round(mm * 56.6929))
+
+    t = merged.get("typography", {}) or {}
+    body_pt = t.get("body_pt")
+    sizes = t.get("sizes", {}) or {}
+
+    def check(name, expected, actual):
+        if expected is not None and actual != expected:
+            failures.append({"check": name, "expected": expected, "actual": actual})
+        else:
+            notes.append({"check": name, "value": actual})
+
+    # headings must not carry the pandoc default blue theme color anywhere
+    if "0F4761" in styles:
+        failures.append({"check": "heading_color_blue_absent", "expected": "no 0F4761", "actual": "found"})
+    else:
+        notes.append({"check": "heading_color_blue_absent", "value": True})
+
+    def attr(tag: str, name: str, xml: str) -> int | None:
+        m = re.search(r"<" + tag + r"\b[^>]*\b" + name + r'="(\d+)"', xml)
+        return int(m.group(1)) if m else None
+
+    normal = _style_block(styles, "Normal")
+    if body_pt is not None:
+        m = re.search(r'<w:sz w:val="(\d+)"', normal)
+        check("normal_sz_halfpt", int(round(body_pt * 2)), int(m.group(1)) if m else None)
+    indent = t.get("first_line_indent_chars")
+    if indent:
+        m = re.search(r'w:firstLineChars="(\d+)"', normal)
+        check("normal_first_line_chars", int(round(indent * 100)), int(m.group(1)) if m else None)
+
+    # line spacing: the regression that silently drops 1.5x spacing must fail the build
+    line_spacing = t.get("line_spacing")
+    if line_spacing:
+        expected_line = int(round(line_spacing * 240))
+        spacing_re = r'<w:spacing[^>]*w:line="(\d+)"[^>]*w:lineRule="auto"'
+        normal_block = _style_block(styles, "Normal")
+        dd_block = re.search(r"<w:docDefaults>.*?</w:docDefaults>", styles, re.S)
+        m_dd = re.search(spacing_re, dd_block.group(0) if dd_block else "")
+        m_n = re.search(spacing_re, normal_block)
+        check("docdefault_line_240", expected_line, int(m_dd.group(1)) if m_dd else None)
+        # Normal may inherit the spacing from docDefaults; only fail when neither has it.
+        actual_n = int(m_n.group(1)) if m_n else (int(m_dd.group(1)) if m_dd else None)
+        check("normal_line_240", expected_line, actual_n)
+
+    for sid, key in (("Title", "title_zh"), ("Heading1", "heading1"), ("Heading2", "heading2")):
+        block = _style_block(styles, sid)
+        m = re.search(r'<w:sz w:val="(\d+)"', block)
+        check(f"{sid.lower()}_sz_halfpt", int(round(sizes[key] * 2)) if sizes.get(key) else None,
+              int(m.group(1)) if m else None)
+
+    east = t.get("east_asia_font")
+    if east:
+        m = re.search(r'w:eastAsia="([^"]+)"', normal)
+        check("normal_east_asia_font", east, m.group(1) if m else None)
+
+    latin = t.get("latin_font")
+    if latin:
+        m = re.search(r'w:ascii="([^"]+)"', normal)
+        check("normal_latin_font", latin, m.group(1) if m else None)
+        m_h = re.search(r'w:hAnsi="([^"]+)"', normal)
+        check("normal_latin_font_hAnsi", latin, m_h.group(1) if m_h else None)
+
+    # header/footer parts must be well-formed XML (title injection escapes the title)
+    for part in [n for n in parts if re.match(r"word/(header|footer)\d*\.xml", n)]:
+        try:
+            xml.etree.ElementTree.fromstring(z.read(part))
+            notes.append({"check": f"{part}_wellformed", "value": True})
+        except Exception as exc:  # noqa: BLE001
+            failures.append({"check": f"{part}_wellformed", "expected": "well-formed XML",
+                             "actual": str(exc)[:160]})
+
+    # page geometry from sectPr (attribute order is not stable across writers — match per attribute)
+    page = merged.get("page", {}) or {}
+    size_mm = {"A4": (210.0, 297.0), "A3": (297.0, 420.0), "letter": (215.9, 279.4), "legal": (215.9, 355.6)}
+    w_mm, h_mm = size_mm.get(page.get("size", "A4"), (210.0, 297.0))
+    check("page_width_twips", twips(w_mm), attr("w:pgSz", "w:w", docxml))
+    check("page_height_twips", twips(h_mm), attr("w:pgSz", "w:h", docxml))
+    margin = page.get("margin", {}) or {}
+    for side in ("top", "bottom", "left", "right"):
+        val = attr("w:pgMar", f"w:{side}", docxml)
+        if val is None:
+            failures.append({"check": f"margin_{side}_twips", "expected": twips(margin.get(side, 25.4)), "actual": None})
+        else:
+            check(f"margin_{side}_twips", twips(margin.get(side, 25.4)), val)
+
+    # footer page number field
+    footer_parts = [n for n in parts if re.match(r"word/footer\d*\.xml", n)]
+    has_page = any("PAGE" in z.read(n).decode("utf-8", "ignore") for n in footer_parts)
+    pagination = merged.get("pagination", {}) or {}
+    if pagination.get("page_number_position", "footer_center") != "none":
+        check("footer_page_field", True, has_page)
+
+    # three-line table style
+    tables_cfg = merged.get("tables", {}) or {}
+    if tables_cfg.get("style") == "three_line":
+        block = _style_block(styles, "Table")
+        has_borders = "tblBorders" in block and block.count('w:val="single"') >= 2
+        check("table_three_line_borders", True, has_borders)
+
+    # formula objects: OMML present iff source math markers exist (checked by caller)
+    notes.append({"check": "omath_count", "value": docxml.count("<m:oMath")})
+    notes.append({"check": "media_images", "value": len([n for n in parts if n.startswith("word/media/")])})
+
+    # Role coverage: a profile role whose paragraph style is defined but never used
+    # in the product means the role silently did not reach the page. This is recorded
+    # as a limitation, so a reviewer can see it (PF-B12 no-silent-degradation).
+    used = set(re.findall(r'<w:pStyle w:val="([^"]+)"', docxml))
+    role_styles = {
+        "abstract": "Abstract", "abstract_label": "AbstractTitle",
+        "reference_entry": "Bibliography", "reference_heading": "Bibliography",
+        "caption": "Caption", "table_caption": "TableCaption",
+        "figure_caption": "ImageCaption", "author": "Author",
+        "affiliation": "Subtitle", "title": "Title",
+    }
+    unused = sorted({style for style in role_styles.values() if style not in used})
+    notes.append({"check": "role_style_coverage", "value": {
+        "used_paragraph_styles": sorted(used),
+        "profile_role_styles_not_used": unused,
+    }})
+    if unused:
+        notes.append({"check": "role_styles_unused_limitation", "value": unused})
+    return failures, notes
+
+
+def _xml_escape_text(text: str) -> str:
+    """Escape a string for insertion into XML text content.
+
+    A title containing & < > would otherwise produce a malformed header part that
+    LibreOffice/Word refuse to open (verified 2026-11-11).
+    """
+    return (text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;"))
+
+
+def _inject_paper_title_header(docx_path: Path, title: str) -> None:
+    """Replace the {{PAPER_TITLE}} placeholder left by the refdoc header part."""
+    import io
+    src = zipfile.ZipFile(docx_path)
+    out = io.BytesIO()
+    replaced = False
+    escaped = _xml_escape_text(title).encode("utf-8")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for name in src.namelist():
+            payload = src.read(name)
+            if re.match(r"word/header\d*\.xml", name) and b"{{PAPER_TITLE}}" in payload:
+                payload = payload.replace(b"{{PAPER_TITLE}}", escaped)
+                replaced = True
+            dst.writestr(name, payload)
+    if replaced:
+        docx_path.write_bytes(out.getvalue())
+
+
+def _cmd_build_docx_impl(args) -> tuple:
+    """Build docx; returns (payload, exit_code) without printing."""
     dest = Path(args.paper)
     if not dest.exists():
-        return emit({"status": "error", "error": f"Paper directory not found: {dest}"}, 2)
+        return ({"status": "error", "error": f"Paper directory not found: {dest}"}, 2)
     info = _get_paper_info(dest)
+    try:
+        paper_cfg = _load_paper_yaml(dest)
+    except Exception as exc:
+        # A malformed paper.yaml is a build failure, not a fallback to the draft profile.
+        return ({"status": "error", "error": f"paper.yaml is unreadable: {exc}", "stage": "pre-build"}, 2)
     snapshot = _create_snapshot(dest)
     try:
         result = subprocess.run(["pandoc", "--version"], capture_output=True, text=True, timeout=5)
@@ -1899,48 +2228,119 @@ def cmd_build_docx(args):
         pandoc_available = False
         pandoc_version = "not found"
     if not pandoc_available:
-        return emit({"status": "error", "error": "pandoc not found. Install pandoc to build docx.", "hint": "apt-get install pandoc || brew install pandoc"}, 2)
+        return ({"status": "error", "error": "pandoc not found. Install pandoc to build docx.", "hint": "apt-get install pandoc || brew install pandoc"}, 2)
+
+    # PF-B3 implementation carrier: profile resolution (fails hard, no silent fallback)
+    try:
+        layout = _resolve_layout_for_build(dest, paper_cfg)
+    except Exception as exc:
+        return ({"status": "error", "error": f"layout profile resolution failed: {exc}", "stage": "pre-build"}, 2)
+    import hashlib
+    refdoc_sha = hashlib.sha256(layout["refdoc_path"].read_bytes()).hexdigest()[:16]
+
+    version = _norm_version(info["version"])
+    title = info["title"] if info["title"] != "(untitled)" else paper_cfg.get("title") or "未命名稿件"
+    title_en = paper_cfg.get("title_en")
+    manuscript_kind = paper_cfg.get("manuscript_kind") or "research"
+
+    body_source = dest / "body" / "paper.md"
+    if not body_source.exists():
+        return ({"status": "error", "error": f"single body source missing: body/paper.md (PF-B2)"}, 2)
+
     build_task_id = f"TASK-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     temp_build_dir = dest / "temp" / f"{info['id']}-{build_task_id}"
     temp_build_dir.mkdir(parents=True, exist_ok=True)
     try:
         output_file = temp_build_dir / "paper.docx"
-        body_files = sorted((dest / "body").glob("*.md"))
-        if not body_files:
-            return emit({"status": "error", "error": "No body/*.md files found"}, 2)
-        cmd = ["pandoc"] + [str(f) for f in body_files] + ["--output", str(output_file), "--from", "markdown", "--to", "docx"]
+        cmd = [
+            "pandoc", str(body_source),
+            "--from", "markdown", "--to", "docx",
+            "--output", str(output_file),
+            "--reference-doc", str(layout["refdoc_path"]),
+            "--resource-path", str(dest),
+            "--metadata", f"title={title}",
+        ]
+        if title_en:
+            cmd += ["--metadata", f"subtitle={title_en}"]
+        authors = [a.get("name") for a in (paper_cfg.get("authors") or []) if a.get("name")]
+        if authors:
+            cmd += ["--metadata", "author=" + "，".join(authors)]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if result.returncode == 0 and output_file.exists():
-            import shutil, json, hashlib
-            rel_id = f"REL-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            output_rel_dir = dest / "output" / rel_id
-            output_rel_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(output_file, output_rel_dir / "paper.docx")
-            manifest = {
-                "release_id": rel_id,
-                "paper_id": info["id"],
-                "paper_version": info["version"],
-                "paper_title": info["title"],
-                "manuscript_kind": "research",
-                "formats": ["docx"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "snapshot": snapshot,
-                "toolchain": {"pandoc": pandoc_version},
-                "artifacts": [{"format": "docx", "path": f"output/{rel_id}/paper.docx", "sha256": hashlib.sha256(output_file.read_bytes()).hexdigest()[:16], "size": output_file.stat().st_size}],
-                "review_status": "pending",
-                "limitations": [],
-            }
-            manifest_file = output_rel_dir / "manifest.json"
-            manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-            current_json = dest / "output" / "current.json"
-            current_json.write_text(json.dumps({"release_id": rel_id, "manifest_path": f"output/{rel_id}/manifest.json"}, ensure_ascii=False), encoding="utf-8")
-            return emit({"status": "ok", "paper_id": info["id"], "release_id": rel_id, "format": "docx", "output_path": str(output_rel_dir / "paper.docx"), "manifest_path": str(manifest_file)})
-        else:
-            return emit({"status": "error", "error": result.stderr.strip() or "pandoc failed", "stderr": result.stderr[:500]}, 1)
+        if result.returncode != 0 or not output_file.exists():
+            return ({"status": "error", "error": result.stderr.strip() or "pandoc failed", "stderr": result.stderr[:500]}, 1)
+
+        _inject_paper_title_header(output_file, title)
+
+        # ── profile-landing assertions (hard fail; no silent degradation) ──
+        failures, layout_notes = _assert_layout_landing(output_file, layout["role"], layout["merged"])
+
+        # ── content-compliance assertion: equations must be OMML, not images (S9) ──
+        source_text = body_source.read_text(encoding="utf-8")
+        math_markers = len(re.findall(r'\$[^$\n]+\$', source_text)) + len(re.findall(r'\$\$.+?\$\$', source_text, re.S))
+        omath_count = next((n["value"] for n in layout_notes if n["check"] == "omath_count"), 0)
+        math_issue = None
+        if math_markers > 0 and omath_count == 0:
+            math_issue = {"check": "formulas_omml", "expected": "oMath objects for source math",
+                          "actual": "0 oMath objects (possible image formulas)"}
+            if manuscript_kind == "submission":
+                failures.append(math_issue)
+            else:
+                layout_notes.append({"check": "formulas_omml_limitation", **math_issue})
+
+        if failures:
+            return ({"status": "error", "error": "layout landing assertions failed (PF-B3: no silent degradation)",
+                         "failures": failures, "artifact_kept_in_temp": str(temp_build_dir)}, 1)
+
+        import shutil
+        out_dir = dest / "build" / version
+        out_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = _posix_safe_title(title)
+        docx_out = out_dir / f"{safe_title}.docx"
+        shutil.copy2(output_file, docx_out)
+        manifest = {
+            "release_id": f"BUILD-{version}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
+            "paper_id": info["id"],
+            "paper_version": version,
+            "paper_title": title,
+            "paper_title_en": title_en,
+            "manuscript_kind": manuscript_kind,
+            "formats": ["docx"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "snapshot": snapshot,
+            "toolchain": {"pandoc": pandoc_version},
+            "layout": {
+                "profile": layout["profile_name"],
+                "rules_version": "0.2.0",
+                "merge_order": "L0(draft) -> L1(venue) -> L2(paper)",
+                "override_log": layout["override_log"],
+                "reference_doc": str(layout["refdoc_path"].relative_to(layoutlib.GOV_ROOT)),
+                "reference_doc_sha256_16": refdoc_sha,
+                "assertions": {"failed": 0, "notes": layout_notes},
+                # Font families the profile requires; the PDF step checks each of them
+                # against the embedded set and records any absence as a limitation.
+                "profile_fonts": _profile_font_families(layout["role"]),
+            },
+            "body_source": "body/paper.md",
+            "artifacts": [{"format": "docx", "path": str(docx_out.relative_to(dest)), "sha256": hashlib.sha256(docx_out.read_bytes()).hexdigest()[:16], "size": docx_out.stat().st_size}],
+            "review_status": "pending",
+            "limitations": [n for n in layout_notes if n.get("check", "").endswith("_limitation")],
+        }
+        manifest_file = out_dir / "manifest.json"
+        manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        current_json = dest / "build" / "current.json"
+        current_json.write_text(json.dumps({"paper_version": version, "manifest_path": f"build/{version}/manifest.json"}, ensure_ascii=False), encoding="utf-8")
+        return ({"status": "ok", "paper_id": info["id"], "paper_version": version, "layout_profile": layout["profile_name"],
+                     "format": "docx", "output_path": str(docx_out), "manifest_path": str(manifest_file),
+                     "layout_assertions": "pass", "override_log_entries": len(layout["override_log"])}, 0)
     except subprocess.TimeoutExpired:
-        return emit({"status": "error", "error": "pandoc timeout (120s)"}, 2)
+        return ({"status": "error", "error": "pandoc timeout (120s)"}, 2)
     except Exception as exc:
-        return emit({"status": "error", "error": str(exc)}, 2)
+        return ({"status": "error", "error": str(exc)}, 2)
+
+
+def cmd_build_docx(args):
+    payload, code = _cmd_build_docx_impl(args)
+    return emit(payload, code)
 
 
 def cmd_build_pdf(args):
@@ -1954,22 +2354,43 @@ def cmd_build_pdf(args):
         lo_available = False
     if not lo_available:
         return emit({"status": "error", "error": "LibreOffice not found. Install to build PDF.", "hint": "apt-get install libreoffice"}, 2)
-    docx_result = cmd_build_docx(args)
+    import hashlib, json
+    docx_result, docx_code = _cmd_build_docx_impl(args)
     if docx_result.get("status") != "ok":
-        return docx_result
+        return emit(docx_result, docx_code)
     docx_path = Path(docx_result["output_path"])
     pdf_path = docx_path.with_suffix(".pdf")
     try:
         result = subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(docx_path.parent), str(docx_path)], capture_output=True, text=True, timeout=180)
         if result.returncode == 0 and pdf_path.exists():
             manifest_path = Path(docx_result["manifest_path"])
+            pdf_fonts: list[str] = []
             if manifest_path.exists():
-                import json, hashlib
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 manifest["formats"].append("pdf")
                 manifest["artifacts"].append({"format": "pdf", "path": str(pdf_path.relative_to(dest)), "sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest()[:16], "size": pdf_path.stat().st_size})
+                # PDF font inventory: declared profile fonts vs actually embedded (LibreOffice
+                # substitutions are recorded here, never silent — PF-B3 no-silent-degradation)
+                try:
+                    pf = subprocess.run(["pdffonts", str(pdf_path)], capture_output=True, text=True, timeout=30)
+                    if pf.returncode == 0:
+                        pdf_fonts = [ln.split()[0] for ln in pf.stdout.splitlines()[2:] if ln.strip()]
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    pdf_fonts = ["(pdffonts unavailable)"]
+                manifest.setdefault("layout", {})["pdf_fonts_embedded"] = sorted(set(pdf_fonts))
+                # PF-B12: every profile font family must be present in the PDF, either as
+                # itself or through a declared substitution. A missing family is recorded
+                # as a limitation, never a silent pass.
+                expected = _expected_pdf_fonts(manifest.get("layout", {}))
+                missing = [f for f in expected if not _font_present(f, pdf_fonts)]
+                manifest["layout"]["pdf_fonts_expected"] = expected
+                manifest["layout"]["pdf_fonts_missing"] = missing
+                if missing:
+                    manifest.setdefault("limitations", []).append(
+                        {"kind": "font_substitution", "detail": "profile fonts absent from PDF",
+                         "missing": missing})
                 manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-            return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path)})
+            return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path), "pdf_fonts": sorted(set(pdf_fonts)) if pdf_fonts else []})
         else:
             return emit({"status": "error", "error": "LibreOffice PDF conversion failed", "stderr": result.stderr[:500]}, 1)
     except Exception as exc:
@@ -2061,7 +2482,9 @@ def main():
     p_scaffold.add_argument("--version", default="0.1.0", help="Initial paper_version (default: 0.1.0)")
 
     p_check = sub.add_parser("check", help="Validate a paper workspace against schema and required paths")
+    p_validate = sub.add_parser("validate", help="Full JSON Schema validation of paper.yaml (PF-PL1 admission gate)")
     p_check.add_argument("--paper", required=True, help="Path to paper workspace directory")
+    p_validate.add_argument("--paper", required=True, help="Path to paper workspace directory")
 
     p_bump = sub.add_parser("version-bump", help="Bump paper_version in paper.yaml")
     p_bump.add_argument("--paper", required=True, help="Path to paper workspace directory")
@@ -2182,6 +2605,7 @@ def main():
         "proposal": cmd_proposal,
         "scaffold": cmd_scaffold,
         "check": cmd_check,
+        "validate": cmd_validate,
         "version-bump": cmd_version_bump,
         "materials": lambda args: {
             "add": cmd_materials_add,

@@ -2,6 +2,7 @@
 # Temporary materials — must not be committed
 temp/
 output/
+build/
 _build/
 
 # Python

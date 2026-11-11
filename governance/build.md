@@ -23,7 +23,8 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 
 - Default draft profile: A4, 25.4mm margins, 12pt body, 1.5x line spacing (overridable).
 - Layout profile has three layers: L0 project draft, L1 venue profile, L2 paper overrides. Merge order: L0 → L1 → L2.
-- Structure-identity keys (`profile`, `kind`, `target_venue`, `page`, `citation`, `formulas`) cannot be overridden by paper config. Changes require profile versioning.
+- Structure-identity keys (`page`, `citation`, `formulas`, `target_venue`) cannot be overridden by paper config. Changes require profile versioning.
+- `profile` and `kind` are **selection keys**, not structure-identity keys: L2 uses them to name the L1 profile it builds against, and they are legal in L2 (see PF-B13).
 - Each profile layer validates against `schemas/layout-profile.schema.json` (additionalProperties: false). Unknown keys fail build.
 
 ### PF-B4 固定输入快照
@@ -49,10 +50,12 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 
 ### PF-B7 版本发布
 
-- Target directory: `output/REL-0001/{paper.docx,paper.pdf,manifest.json}`. Subsequent numbers increment.
+- Target directory: `build/<version>/`, where `<version>` is the paper's SemVer version (e.g., `v1.0.0`).
+- Filenames use the paper's Chinese full title with POSIX-safe escaping: spaces and special characters (`/ \ : * ? " < > |`) replaced with `_`; Chinese characters preserved as UTF-8.
+  Example: `基于辩论的可解释AI验证框架研究.pdf`, `基于辩论的可解释AI验证框架研究.docx`.
 - Published versions cannot be modified in place. Old versions preserved.
-- Manifest records: non-reusable REL ID, paper identity, paper_version, manuscript_kind, title and authorship config, input snapshot, rules_version, toolchain version, environment, both artifact checksums, review and re-verification relationships, open limitations, timestamp.
-- After all checks complete, atomically switch `output/current.json` within publish lock. Read first parses manifest, then reads referenced full version.
+- Manifest records: paper identity, paper_version, manuscript_kind, title and authorship config, input snapshot, rules_version, toolchain version, environment, both artifact checksums, review and re-verification relationships, open limitations, timestamp.
+- After all checks complete, atomically switch `build/current.json` within publish lock. Read first parses manifest, then reads referenced full version.
 
 ### PF-B8 本地交付
 
@@ -71,5 +74,35 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 
 - Three-layer structure: L0 project draft profile, L1 venue profile (registered in templates/layout/registry.yaml), L2 paper overrides.
 - Merge order L0 → L1 → L2, key-by-key override. Each overridden key must appear in build log with old/new/source-layer.
+- L2 boundary: besides the selection keys `profile`/`kind`, L2 may only carry `typography` (PF-B13). Any other domain key in L2 fails the build.
 - Semantic conflicts (incompatible units or semantics for same key) fail build after profile Schema reconciliation attempt.
 - `paper.yaml` semantic keys (`language`, `bilingual_abstract`, `full_english_body`) must not conflict with global profile.
+
+### PF-B11 版式实现载体
+
+- A layout profile is a declaration; it becomes binding only through a generated **reference docx** consumed by the build (`pandoc --reference-doc`).
+- The reference docx is **generated from the profile** by `tools/make_refdoc.py` (single source of truth). Hand-editing files under `templates/layout/refdoc/` is forbidden; profile change ⇒ regenerate ⇒ review the diff.
+- Registry entries carry the reference docx path. A missing reference docx **fails the build**; silent fallback to the pandoc default reference doc is forbidden (it silently drops page size, margins, line spacing and CJK font — verified on 2026-11-11 against the v0.3.1 artifacts).
+- `tools/make_refdoc.py` and `tools/layoutlib.py` use the **standard library only**; the project toolchain runs under `python3 -I`, which excludes user site-packages. Declared toolchain dependencies are limited to `yaml` and `jsonschema` (both in `/usr/lib/python3/dist-packages`).
+- Reference docx generation must be **deterministic** (fixed zip timestamps and core.xml dates) so that regeneration is byte-comparable and a profile change is visible as a diff.
+
+### PF-B12 版式落地校验
+
+- After building, the produced docx is re-parsed and asserted against the merged profile: page size, margins, body font family (Latin and CJK), body size, line spacing, first-line indent, heading sizes, table rule style, page-number field, header/footer part well-formedness, and absence of the pandoc default blue heading colour.
+- Any failed assertion **fails the build**. The manifest records the assertion notes and any declared limitation (e.g. formulas not carried as editable equation objects, or a profile role whose paragraph style the produced document never uses).
+- Assertions must cover the **regression** case as well: a build that loses page size, margins, line spacing or CJK font relative to the profile is a failure even when the file opens correctly. `tools/verify_layout.py` proves this by mutating a built artifact and requiring the assertion layer to fail.
+- Font substitution by the PDF conversion step is recorded, never silent: the build compares the font families the profile requires against the families actually embedded in the PDF, and any family that is absent is written to the manifest as a limitation with the missing list.
+
+### PF-B13 L2 覆盖边界
+
+- L2 (`build/layout.yaml`) carries **selection keys only**: `profile` (must equal `paper.yaml.layout_profile`) and `kind: paper`.
+- Structure-identity keys (`page`, `citation`, `formulas`, `target_venue`) appearing in L2 **fail the build**; changing them requires profile versioning (PF-B3).
+- L2 may override `typography` keys only (e.g. `body_pt`, `line_spacing`); every override is logged with old/new/source-layer (PF-B10).
+- Each layer and the merged result validate against `schemas/layout-profile.schema.json`; unknown keys fail the build.
+
+### PF-B14 版式数值来源等级
+
+- Every numeric value in a profile that is not stated verbatim by the target venue carries a provenance annotation: the profile comments tag each value with its source level (e.g. `[S#]` venue, `[GB]` national standard, `[CY]` industry standard, `[JT]` journal-measured, `[TD]` common practice); a structured key-level provenance block remains an open item (GC-2026-1111-02 open list).
+- Source levels: `national_standard`, `national_standard_advisory`, `industry_standard`, `venue_requirement`, `venue_advisory`, `journal_measured`, `common_practice`, `self_chosen`.
+- `self_chosen` values must never be presented to the venue, the user, or in a manifest as a venue requirement. Profile comments must mark each value with its source level.
+- Venue requirements take precedence over the national-standard fallback for the same key; the fallback applies only where the venue is silent.

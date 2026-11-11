@@ -1,0 +1,749 @@
+#!/usr/bin/env python3
+"""make_refdoc — generate the pandoc reference docx from a layout profile.
+
+PF-B3 implementation carrier (GC-2026-1111-02): the reference docx is GENERATED
+from the profile YAML (single source of truth). Never hand-edit files under
+templates/layout/refdoc/ — regenerate with this tool and review the diff.
+
+Usage:
+    python3 -I tools/make_refdoc.py                # regenerate every registry profile
+    python3 -I tools/make_refdoc.py --profile stie # one profile
+    python3 -I tools/make_refdoc.py --check         # verify checked-in refdocs match the profiles
+
+Pipeline: pandoc default reference.docx -> stdlib-only OOXML post-processing driven
+by the L0+L1 merged profile (L2 never applies to refdocs) -> deterministic zip.
+
+Dependency policy: STANDARD LIBRARY ONLY. The project toolchain runs under
+`python3 -I` (isolated mode), which excludes user site-packages; therefore
+python-docx / lxml are NOT available here and must not be relied upon. The
+governance toolchain's declared dependencies are yaml + jsonschema (both in
+/usr/lib/python3/dist-packages).
+
+Determinism: fixed zip timestamps and core.xml dates so regenerated files are
+byte-comparable unless the profile actually changed.
+"""
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import re
+import subprocess
+import sys
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+TOOLS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TOOLS_DIR))
+
+import layoutlib  # noqa: E402
+
+FIXED_DATE = (1980, 1, 1, 0, 0, 0)
+FIXED_CORE_DATE = "1980-01-01T00:00:00Z"
+
+MM_TO_TWIPS = 56.6929  # 1440 twips / 25.4 mm
+
+PAGE_SIZES = {  # width x height in mm
+    "A4": (210.0, 297.0),
+    "A3": (297.0, 420.0),
+    "letter": (215.9, 279.4),
+    "legal": (215.9, 355.6),
+}
+
+HEADER_RID = "rId31"
+FOOTER_RID = "rId32"
+
+# Canonical child order inside <w:pPr> (subset of ECMA-376 CT_PPr).
+PPR_ORDER = [
+    "w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr",
+    "w:widowControl", "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd",
+    "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap",
+    "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN",
+    "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind",
+    "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc",
+    "w:textDirection", "w:textAlignment", "w:textboxTightWrap", "w:outlineLvl",
+    "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr",
+]
+
+# Canonical child order inside <w:rPr> (subset of ECMA-376 CT_RPr).
+RPR_ORDER = [
+    "w:rStyle", "w:rFonts", "w:b", "w:bCs", "w:i", "w:iCs", "w:caps",
+    "w:smallCaps", "w:strike", "w:dstrike", "w:outline", "w:shadow",
+    "w:emboss", "w:imprint", "w:noProof", "w:snapToGrid", "w:vanish",
+    "w:webHidden", "w:color", "w:spacing", "w:w", "w:kern", "w:position",
+    "w:sz", "w:szCs", "w:highlight", "w:u", "w:effect", "w:bdr", "w:shd",
+    "w:fitText", "w:vertAlign", "w:rtl", "w:cs", "w:em", "w:lang",
+]
+
+
+def default_reference_bytes() -> bytes:
+    result = subprocess.run(
+        ["pandoc", "--print-default-data-file", "reference.docx"],
+        capture_output=True, timeout=30,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise layoutlib.LayoutError(f"cannot get pandoc default reference.docx: {result.stderr[:200]}")
+    return result.stdout
+
+
+# ------------------------------------------------------------------ XML helpers
+
+def _split_top_level(inner: str) -> list[tuple[str, str]]:
+    """Split an element's inner XML into (tagname, xml) children."""
+    out: list[tuple[str, str]] = []
+    i, n = 0, len(inner)
+    while i < n:
+        if inner[i] != "<":
+            i += 1
+            continue
+        m = re.match(r"<([A-Za-z0-9:]+)", inner[i:])
+        if not m:
+            i += 1
+            continue
+        tag = m.group(1)
+        j = inner.index(">", i)
+        if inner[j - 1] == "/":
+            out.append((tag, inner[i:j + 1]))
+            i = j + 1
+            continue
+        depth, k = 1, j + 1
+        while depth > 0:
+            close = inner.find("</%s>" % tag, k)
+            if close == -1:
+                raise layoutlib.LayoutError(f"unbalanced <{tag}> in OOXML fragment")
+            open_same = inner.find("<%s" % tag, k)
+            if open_same != -1 and open_same < close:
+                depth += 1
+                k = inner.index(">", open_same) + 1
+                continue
+            depth -= 1
+            k = close + len(tag) + 3
+        out.append((tag, inner[i:k]))
+        i = k
+    return out
+
+
+def _insert_ordered(inner: str, tag: str, xml: str, order: list[str]) -> str:
+    """Insert (or replace) a single child element honouring the schema order."""
+    children = _split_top_level(inner)
+    children = [(t, x) for t, x in children if t != tag]
+    try:
+        rank = order.index(tag)
+    except ValueError:
+        rank = len(order)
+    pos = len(children)
+    for idx, (t, _x) in enumerate(children):
+        tr = order.index(t) if t in order else len(order)
+        if tr > rank:
+            pos = idx
+            break
+    children.insert(pos, (tag, xml))
+    return "".join(x for _t, x in children)
+
+
+def _find_element(xml: str, tag: str) -> tuple[int, int] | None:
+    """Return (start, end) span of the first <tag ...>...</tag> or <tag .../>."""
+    m = re.search(r"<%s(?:\s[^>]*)?>" % re.escape(tag), xml)
+    if not m:
+        return None
+    if xml[m.end() - 2] == "/":
+        return m.start(), m.end()
+    close = xml.find("</%s>" % tag, m.end())
+    if close == -1:
+        return None
+    return m.start(), close + len(tag) + 3
+
+
+def _element_inner(xml: str, tag: str) -> str:
+    span = _find_element(xml, tag)
+    if span is None:
+        return ""
+    s, e = span
+    frag = xml[s:e]
+    if frag.endswith("/>"):
+        return ""
+    open_end = frag.index(">") + 1
+    return frag[open_end:frag.rindex("</")]
+
+
+def _replace_element(xml: str, tag: str, new_frag: str) -> str:
+    span = _find_element(xml, tag)
+    if span is None:
+        return xml
+    s, e = span
+    return xml[:s] + new_frag + xml[e:]
+
+
+def _ensure_element(block: str, tag: str, before_tags: tuple[str, ...]) -> str:
+    """Ensure <tag> exists in a style block; create it before the first of before_tags."""
+    if _find_element(block, tag) is not None:
+        return block
+    for other in before_tags:
+        span = _find_element(block, other)
+        if span is not None:
+            s, _e = span
+            return block[:s] + f"<{tag}></{tag}>" + block[s:]
+    idx = block.rindex("</w:style>")
+    return block[:idx] + f"<{tag}></{tag}>" + block[idx:]
+
+
+def _rfonts_xml(east_asia: str | None, latin: str | None) -> str:
+    attrs = []
+    if latin:
+        attrs += [f'w:ascii="{latin}"', f'w:hAnsi="{latin}"', f'w:cs="{latin}"']
+    if east_asia:
+        attrs.append(f'w:eastAsia="{east_asia}"')
+    return "<w:rFonts " + " ".join(attrs) + "/>"
+
+
+def _apply_rpr(block: str, *, fonts: tuple[str | None, str | None] | None = None,
+               size_pt: float | None = None, bold: bool | None = None,
+               italic: bool | None = None, black: bool = False) -> str:
+    block = _ensure_element(block, "w:rPr", ("w:tblPr", "w:trPr", "w:tcPr", "w:tblStylePr"))
+    span = _find_element(block, "w:rPr")
+    assert span is not None
+    s, e = span
+    frag = block[s:e]
+    if frag.endswith("/>"):
+        inner = ""
+        close = ""
+    else:
+        inner = frag[frag.index(">") + 1: frag.rindex("</")]
+        close = "</w:rPr>"
+    if fonts is not None:
+        inner = _insert_ordered(inner, "w:rFonts", _rfonts_xml(fonts[0], fonts[1]), RPR_ORDER)
+    if size_pt is not None:
+        hp = str(int(round(size_pt * 2)))
+        inner = _insert_ordered(inner, "w:sz", f'<w:sz w:val="{hp}"/>', RPR_ORDER)
+        inner = _insert_ordered(inner, "w:szCs", f'<w:szCs w:val="{hp}"/>', RPR_ORDER)
+    if bold is not None:
+        val = "1" if bold else "0"
+        inner = _insert_ordered(inner, "w:b", f'<w:b w:val="{val}"/>', RPR_ORDER)
+        inner = _insert_ordered(inner, "w:bCs", f'<w:bCs w:val="{val}"/>', RPR_ORDER)
+    if italic is not None:
+        val = "1" if italic else "0"
+        inner = _insert_ordered(inner, "w:i", f'<w:i w:val="{val}"/>', RPR_ORDER)
+        inner = _insert_ordered(inner, "w:iCs", f'<w:iCs w:val="{val}"/>', RPR_ORDER)
+    if black:
+        inner = _insert_ordered(inner, "w:color", '<w:color w:val="000000"/>', RPR_ORDER)
+    new_frag = f"<w:rPr>{inner}</w:rPr>"
+    return block[:s] + new_frag + block[e:]
+
+
+def _apply_ppr(block: str, *, align: str | None = None,
+               first_line_chars: float | None = None, first_line_pt: float | None = None,
+               hanging_cm: float | None = None, space_before_pt: float | None = None,
+               space_after_pt: float | None = None, line_spacing: float | None = None,
+               keep_with_next: bool | None = None) -> str:
+    block = _ensure_element(block, "w:pPr", ("w:rPr", "w:tblPr", "w:trPr", "w:tcPr", "w:tblStylePr"))
+    span = _find_element(block, "w:pPr")
+    assert span is not None
+    s, e = span
+    frag = block[s:e]
+    if frag.endswith("/>"):
+        inner, close = "", ""
+    else:
+        inner = frag[frag.index(">") + 1: frag.rindex("</")]
+        close = "</w:pPr>"
+    if keep_with_next is not None:
+        inner = _insert_ordered(inner, "w:keepNext",
+                                '<w:keepNext w:val="%s"/>' % ("1" if keep_with_next else "0"), PPR_ORDER)
+    if any(v is not None for v in (space_before_pt, space_after_pt, line_spacing)):
+        attrs = []
+        if space_before_pt is not None:
+            attrs.append(f'w:before="{int(round(space_before_pt * 20))}"')
+        if space_after_pt is not None:
+            attrs.append(f'w:after="{int(round(space_after_pt * 20))}"')
+        if line_spacing is not None:
+            attrs.append(f'w:line="{int(round(line_spacing * 240))}"')
+            attrs.append('w:lineRule="auto"')
+        inner = _insert_ordered(inner, "w:spacing", "<w:spacing " + " ".join(attrs) + "/>", PPR_ORDER)
+    if first_line_chars is not None or hanging_cm is not None:
+        attrs = []
+        if first_line_chars is not None:
+            attrs.append(f'w:firstLineChars="{int(round(first_line_chars * 100))}"')
+            attrs.append(f'w:firstLine="{int(round((first_line_pt or 0) * 20))}"')
+        if hanging_cm is not None:
+            tw = str(int(round(hanging_cm * 567)))
+            attrs.append(f'w:left="{tw}"')
+            attrs.append(f'w:hanging="{tw}"')
+        inner = _insert_ordered(inner, "w:ind", "<w:ind " + " ".join(attrs) + "/>", PPR_ORDER)
+    if align is not None:
+        inner = _insert_ordered(inner, "w:jc", f'<w:jc w:val="{align}"/>', PPR_ORDER)
+    new_frag = f"<w:pPr>{inner}</w:pPr>"
+    return block[:s] + new_frag + block[e:]
+
+
+def _neutralise_theme_colours(styles: str) -> str:
+    """Replace pandoc's blue theme heading colour with plain black everywhere.
+
+    Pandoc's factory reference doc paints headings in accent1 (#0F4761). A paper
+    must never inherit that, and PF-B3 forbids silent style degradation, so the
+    sweep is unconditional rather than limited to the styles we patch.
+    """
+    def repl(m: re.Match) -> str:
+        attrs = m.group(1)
+        if "0F4761" not in attrs and "themeColor=\"accent1\"" not in attrs:
+            return m.group(0)
+        attrs = re.sub(r'\s*w:themeColor="[^"]*"', "", attrs)
+        attrs = re.sub(r'\s*w:themeShade="[^"]*"', "", attrs)
+        attrs = re.sub(r'\s*w:themeTint="[^"]*"', "", attrs)
+        attrs = re.sub(r'w:val="[^"]*"', 'w:val="000000"', attrs)
+        return f"<w:color{attrs}/>"
+
+    return re.sub(r"<w:color([^>]*)/>", repl, styles)
+
+
+def _patch_style(styles: str, style_id: str, **kwargs) -> str:
+    """Patch one <w:style> block inside styles.xml."""
+    pattern = r'<w:style [^>]*w:styleId="%s"[^>]*>.*?</w:style>' % re.escape(style_id)
+    m = re.search(pattern, styles, re.S)
+    if not m:
+        return styles
+    block = m.group(0)
+    if "rpr" in kwargs:
+        block = _apply_rpr(block, **kwargs["rpr"])
+    if "ppr" in kwargs:
+        block = _apply_ppr(block, **kwargs["ppr"])
+    return styles[:m.start()] + block + styles[m.end():]
+
+
+# ------------------------------------------------------------------ table style
+
+def _border_el(tag: str, sz_pt: float) -> str:
+    return (f'<{tag} w:val="single" w:sz="{int(round(sz_pt * 8))}" '
+            f'w:space="0" w:color="000000"/>')
+
+
+def _none_border(tag: str) -> str:
+    return f'<{tag} w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
+
+
+def _apply_three_line(styles: str, tables_cfg: dict) -> str:
+    widths = tables_cfg.get("border_widths_pt") or {"top": 1.0, "header": 0.5, "bottom": 1.0}
+    pattern = r'<w:style [^>]*w:styleId="Table"[^>]*>.*?</w:style>'
+    m = re.search(pattern, styles, re.S)
+    if not m:
+        return styles
+    block = m.group(0)
+
+    borders = ("<w:tblBorders>"
+               + _border_el("w:top", widths.get("top", 1.0))
+               + _none_border("w:left")
+               + _border_el("w:bottom", widths.get("bottom", 1.0))
+               + _none_border("w:right")
+               + _none_border("w:insideH")
+               + _none_border("w:insideV")
+               + "</w:tblBorders>")
+
+    tbl_pr = _element_inner(block, "w:tblPr")
+    if not tbl_pr:
+        block = _ensure_element(block, "w:tblPr", ("w:tblStylePr",))
+        tbl_pr = _element_inner(block, "w:tblPr")
+    # tblBorders sits after tblInd and before tblCellMar (CT_TblPrBase order).
+    inner = _insert_ordered(tbl_pr, "w:tblBorders", borders, [
+        "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual",
+        "w:tblStyleRowBandSize", "w:tblStyleColBandSize", "w:tblW", "w:jc",
+        "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd", "w:tblLayout",
+        "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",
+    ])
+    block = _replace_element(block, "w:tblPr", f"<w:tblPr>{inner}</w:tblPr>")
+
+    # header-row rule via conditional formatting (pandoc tables set firstRow look)
+    block = re.sub(r"<w:tblStylePr\b.*?</w:tblStylePr>", "", block, flags=re.S)
+    style_pr = (
+        '<w:tblStylePr w:type="firstRow"><w:tcPr><w:tcBorders>'
+        + _border_el("w:bottom", widths.get("header", 0.5))
+        + "</w:tcBorders><w:vAlign w:val=\"bottom\"/></w:tcPr></w:tblStylePr>"
+    )
+    idx = block.rindex("</w:style>")
+    block = block[:idx] + style_pr + block[idx:]
+    return styles[:m.start()] + block + styles[m.end():]
+
+
+# -------------------------------------------------------------- header / footer
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _run_props_xml(latin: str, east_asia: str, pt: float) -> str:
+    hp = str(int(round(pt * 2)))
+    return (f'<w:rPr><w:rFonts w:ascii="{latin}" w:hAnsi="{latin}" w:cs="{latin}" '
+            f'w:eastAsia="{east_asia}"/><w:sz w:val="{hp}"/><w:szCs w:val="{hp}"/></w:rPr>')
+
+
+def _footer_xml(latin: str, east_asia: str, pt: float) -> bytes:
+    rp = _run_props_xml(latin, east_asia, pt)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<w:ftr xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
+        '<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>'
+        f'<w:r>{rp}<w:fldChar w:fldCharType="begin"/></w:r>'
+        f'<w:r>{rp}<w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>'
+        f'<w:r>{rp}<w:fldChar w:fldCharType="end"/></w:r>'
+        "</w:p></w:ftr>"
+    )
+    return xml.encode("utf-8")
+
+
+def _header_xml(latin: str, east_asia: str, pt: float) -> bytes:
+    rp = _run_props_xml(latin, east_asia, pt)
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<w:hdr xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
+        '<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="center"/></w:pPr>'
+        f'<w:r>{rp}<w:t>{{{{PAPER_TITLE}}}}</w:t></w:r>'
+        "</w:p></w:hdr>"
+    )
+    return xml.encode("utf-8")
+
+
+def _header_footer_styles(styles: str, header_pt: float, page_pt: float) -> str:
+    def mk(style_id: str, name: str, pt: float) -> str:
+        hp = str(int(round(pt * 2)))
+        return (
+            f'<w:style w:type="paragraph" w:customStyle="1" w:styleId="{style_id}">'
+            f'<w:name w:val="{name}"/><w:basedOn w:val="Normal"/>'
+            f'<w:pPr><w:jc w:val="center"/></w:pPr>'
+            f'<w:rPr><w:sz w:val="{hp}"/><w:szCs w:val="{hp}"/></w:rPr></w:style>'
+        )
+    extra = mk("Header", "header", header_pt) + mk("Footer", "footer", page_pt)
+    idx = styles.rindex("</w:styles>")
+    return styles[:idx] + extra + styles[idx:]
+
+
+# ------------------------------------------------------------------ section/doc
+
+def _apply_section(doc_xml: str, page_cfg: dict) -> str:
+    size = page_cfg.get("size", "A4")
+    w_mm, h_mm = PAGE_SIZES.get(size, PAGE_SIZES["A4"])
+    margin = page_cfg.get("margin", {}) or {}
+
+    def tw(mm: float) -> int:
+        return int(round(mm * MM_TO_TWIPS))
+
+    sect = (
+        "<w:sectPr>"
+        f'<w:headerReference w:type="default" r:id="{HEADER_RID}"/>'
+        f'<w:footerReference w:type="default" r:id="{FOOTER_RID}"/>'
+        '<w:footnotePr><w:numRestart w:val="eachSect"/></w:footnotePr>'
+        f'<w:pgSz w:w="{tw(w_mm)}" w:h="{tw(h_mm)}"/>'
+        f'<w:pgMar w:top="{tw(margin.get("top", 25.4))}" w:bottom="{tw(margin.get("bottom", 25.4))}" '
+        f'w:left="{tw(margin.get("left", 25.4))}" w:right="{tw(margin.get("right", 25.4))}" '
+        'w:header="720" w:footer="720" w:gutter="0"/>'
+        '<w:cols w:space="425"/>'
+        '<w:docGrid w:linePitch="312"/>'
+        "</w:sectPr>"
+    )
+    span = _find_element(doc_xml, "w:sectPr")
+    if span is None:
+        idx = doc_xml.rindex("</w:body>")
+        return doc_xml[:idx] + sect + doc_xml[idx:]
+    s, e = span
+    return doc_xml[:s] + sect + doc_xml[e:]
+
+
+def _apply_doc_defaults(styles: str, role: dict) -> str:
+    span = _find_element(styles, "w:docDefaults")
+    if span is None:
+        return styles
+    s, e = span
+    frag = styles[s:e]
+    inner = _element_inner(frag, "w:docDefaults")
+
+    body_east, body_latin = role["fonts"]["body"]
+    rprd = _element_inner(inner, "w:rPrDefault")
+    rpr = _element_inner(rprd, "w:rPr")
+    rpr = _insert_ordered(rpr, "w:rFonts", _rfonts_xml(body_east, body_latin), RPR_ORDER)
+    if role["body_pt"]:
+        hp = str(int(round(role["body_pt"] * 2)))
+        rpr = _insert_ordered(rpr, "w:sz", f'<w:sz w:val="{hp}"/>', RPR_ORDER)
+        rpr = _insert_ordered(rpr, "w:szCs", f'<w:szCs w:val="{hp}"/>', RPR_ORDER)
+    rprd = _replace_element(rprd, "w:rPr", f"<w:rPr>{rpr}</w:rPr>")
+    inner = _replace_element(inner, "w:rPrDefault", f"<w:rPrDefault>{rprd}</w:rPrDefault>")
+
+    pprd = _element_inner(inner, "w:pPrDefault")
+    ppr = _element_inner(pprd, "w:pPr")
+    attrs = ['w:before="0"', 'w:after="0"']
+    if role["line_spacing"]:
+        attrs.append(f'w:line="{int(round(role["line_spacing"] * 240))}"')
+        attrs.append('w:lineRule="auto"')
+    ppr = _insert_ordered(ppr, "w:spacing", "<w:spacing " + " ".join(attrs) + "/>", PPR_ORDER)
+    pprd = _replace_element(pprd, "w:pPr", f"<w:pPr>{ppr}</w:pPr>")
+    inner = _replace_element(inner, "w:pPrDefault", f"<w:pPrDefault>{pprd}</w:pPrDefault>")
+
+    new_frag = f"<w:docDefaults>{inner}</w:docDefaults>"
+    return styles[:s] + new_frag + styles[e:]
+
+
+# --------------------------------------------------------------- package plumbing
+
+def _add_relationship(rels: str, rid: str, rel_type: str, target: str) -> str:
+    if f'Id="{rid}"' in rels:
+        return rels
+    rel = (f'<Relationship Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+           f'relationships/{rel_type}" Id="{rid}" Target="{target}" />')
+    idx = rels.rindex("</Relationships>")
+    return rels[:idx] + rel + rels[idx:]
+
+
+def _add_content_type(ct: str, part: str, kind: str) -> str:
+    if f'PartName="/{part}"' in ct:
+        return ct
+    override = (f'<Override PartName="/{part}" ContentType="application/vnd.'
+                f'openxmlformats-officedocument.wordprocessingml.{kind}+xml" />')
+    idx = ct.rindex("</Types>")
+    return ct[:idx] + override + ct[idx:]
+
+
+def _deterministic_zip(parts: dict[str, bytes]) -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for name in sorted(parts):
+            payload = parts[name]
+            if name == "docProps/core.xml":
+                text = payload.decode("utf-8")
+                text = re.sub(r"(<dcterms:created[^>]*>)[^<]*(</dcterms:created>)",
+                              r"\g<1>" + FIXED_CORE_DATE + r"\g<2>", text)
+                text = re.sub(r"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)",
+                              r"\g<1>" + FIXED_CORE_DATE + r"\g<2>", text)
+                payload = text.encode("utf-8")
+            info = zipfile.ZipInfo(name, date_time=FIXED_DATE)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            dst.writestr(info, payload)
+    return out.getvalue()
+
+
+# ------------------------------------------------------------------ main transform
+
+def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
+    stack = layoutlib.resolve_profile_stack(profile_name)
+    role = layoutlib.merged_role(stack["merged"])
+
+    src = zipfile.ZipFile(io.BytesIO(base_bytes))
+    parts = {name: src.read(name) for name in src.namelist()}
+
+    styles = parts["word/styles.xml"].decode("utf-8")
+    doc_xml = parts["word/document.xml"].decode("utf-8")
+    rels = parts["word/_rels/document.xml.rels"].decode("utf-8")
+    ctypes = parts["[Content_Types].xml"].decode("utf-8")
+
+    f, s, p = role["fonts"], role["sizes"], role["paragraph"]
+    indent_chars = role["first_line_indent_chars"] or 0
+    body_pt = role["body_pt"] or 10.5
+
+    # 1. doc defaults
+    styles = _apply_doc_defaults(styles, role)
+
+    # 2. table rule style
+    if (role["tables"] or {}).get("style") == "three_line":
+        styles = _apply_three_line(styles, role["tables"])
+
+    # 3. paragraph styles
+    styles = _patch_style(styles, "Normal",
+                           rpr={"fonts": f["body"], "size_pt": s.get("body")},
+                           ppr={"align": "both",
+                                "first_line_chars": indent_chars,
+                                "first_line_pt": indent_chars * body_pt,
+                                "space_before_pt": p.get("spacing_before_pt", 0),
+                                "space_after_pt": p.get("spacing_after_pt", 0),
+                                "line_spacing": role["line_spacing"]})
+    styles = _patch_style(styles, "Title",
+                           rpr={"fonts": f["title"], "size_pt": s.get("title_zh"), "black": True},
+                           ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                "space_before_pt": 0, "space_after_pt": 12, "keep_with_next": True})
+    styles = _patch_style(styles, "Subtitle",
+                           rpr={"fonts": f["title"], "size_pt": s.get("title_en"), "black": True},
+                           ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                "space_before_pt": 0, "space_after_pt": 12, "keep_with_next": True})
+    styles = _patch_style(styles, "Author",
+                           rpr={"fonts": f["author"], "size_pt": s.get("author"), "black": True},
+                           ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                "space_before_pt": 0, "space_after_pt": 0})
+    styles = _patch_style(styles, "AbstractTitle",
+                           rpr={"fonts": f["heading"], "size_pt": s.get("abstract_label"),
+                                "bold": True, "black": True},
+                           ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                "space_before_pt": 6, "space_after_pt": 0, "keep_with_next": True})
+    styles = _patch_style(styles, "Abstract",
+                           rpr={"fonts": f["abstract"], "size_pt": s.get("abstract"), "black": True},
+                           ppr={"align": "both", "first_line_chars": 0, "first_line_pt": 0,
+                                "space_before_pt": 0, "space_after_pt": 6})
+
+    heading_space = {1: (12, 6), 2: (6, 3), 3: (6, 3), 4: (3, 0), 5: (3, 0)}
+    for level in range(1, 6):
+        before, after = heading_space.get(level, (3, 0))
+        styles = _patch_style(styles, f"Heading{level}",
+                               rpr={"fonts": f["heading"], "size_pt": s.get(f"heading{level}"),
+                                    "bold": True, "italic": False, "black": True},
+                               ppr={"align": "left", "first_line_chars": 0, "first_line_pt": 0,
+                                    "space_before_pt": before, "space_after_pt": after,
+                                    "keep_with_next": True})
+        # linked character style carries the same face; it also holds pandoc's
+        # default blue heading colour, which must not survive into a paper.
+        styles = _patch_style(styles, f"Heading{level}Char",
+                               rpr={"fonts": f["heading"], "size_pt": s.get(f"heading{level}"),
+                                    "bold": True, "italic": False, "black": True})
+
+    # Safety net: no style may keep pandoc's blue theme heading colour.
+    styles = _neutralise_theme_colours(styles)
+
+    for name in ("Caption", "ImageCaption", "TableCaption"):
+        styles = _patch_style(styles, name,
+                               rpr={"fonts": f["caption"], "size_pt": s.get("caption"),
+                                    "italic": False, "bold": True, "black": True},
+                               ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                    "space_before_pt": 3, "space_after_pt": 6,
+                                    "keep_with_next": name == "TableCaption"})
+
+    refs = role["references"] or {}
+    styles = _patch_style(styles, "Bibliography",
+                           rpr={"fonts": f["reference"], "size_pt": refs.get("entry_pt", s.get("reference_entry")),
+                                "black": True},
+                           ppr={"align": "both",
+                                "hanging_cm": refs.get("hanging_indent_cm", 0.74) if refs.get("hanging_indent", True) else None,
+                                "space_before_pt": 0, "space_after_pt": refs.get("entry_spacing_pt", 0)})
+
+    styles = _patch_style(styles, "BlockText",
+                           rpr={"fonts": f["abstract"], "size_pt": s.get("abstract"), "black": True},
+                           ppr={"align": "both", "first_line_chars": 0, "first_line_pt": 0,
+                                "space_before_pt": 0, "space_after_pt": 6})
+    styles = _patch_style(styles, "SourceCode",
+                           rpr={"fonts": (None, f["code"][1]), "size_pt": s.get("code")})
+    styles = _patch_style(styles, "VerbatimChar",
+                           rpr={"fonts": (None, f["code"][1]), "size_pt": s.get("code")})
+    styles = _patch_style(styles, "FootnoteText",
+                           rpr={"size_pt": s.get("footnote")})
+
+    # 4. header / footer styles + parts
+    pagination = role["pagination"] or {}
+    styles = _header_footer_styles(styles, s.get("header") or 9, s.get("page_number") or 7.5)
+    latin_body = f["body"][1] or "Times New Roman"
+    east_body = f["body"][0] or "宋体"
+    if pagination.get("page_number_position", "footer_center") != "none":
+        parts["word/footer1.xml"] = _footer_xml(latin_body, east_body, s.get("page_number") or 7.5)
+        rels = _add_relationship(rels, FOOTER_RID, "footer", "footer1.xml")
+        ctypes = _add_content_type(ctypes, "word/footer1.xml", "footer")
+    if pagination.get("header", "title_center") != "none":
+        parts["word/header1.xml"] = _header_xml(latin_body, east_body, s.get("header") or 9)
+        rels = _add_relationship(rels, HEADER_RID, "header", "header1.xml")
+        ctypes = _add_content_type(ctypes, "word/header1.xml", "header")
+
+    # 5. section geometry
+    doc_xml = _apply_section(doc_xml, role["page"])
+
+    parts["word/styles.xml"] = styles.encode("utf-8")
+    parts["word/document.xml"] = doc_xml.encode("utf-8")
+    parts["word/_rels/document.xml.rels"] = rels.encode("utf-8")
+    parts["[Content_Types].xml"] = ctypes.encode("utf-8")
+
+    data = _deterministic_zip(parts)
+    checks = self_check(data, role)
+    return data, checks
+
+
+def self_check(data: bytes, role: dict) -> dict:
+    z = zipfile.ZipFile(io.BytesIO(data))
+    styles = z.read("word/styles.xml").decode("utf-8")
+    docxml = z.read("word/document.xml").decode("utf-8")
+    names = z.namelist()
+    checks: dict[str, object] = {}
+
+    def style_block(sid: str) -> str:
+        m = re.search(r'<w:style [^>]*w:styleId="%s"[^>]*>.*?</w:style>' % re.escape(sid), styles, re.S)
+        return m.group(0) if m else ""
+
+    def sz_of(sid: str):
+        m = re.search(r'<w:sz w:val="(\d+)"', style_block(sid))
+        return int(m.group(1)) / 2 if m else None
+
+    checks["title_pt"] = sz_of("Title")
+    checks["title_pt_expected"] = role["sizes"].get("title_zh")
+    checks["heading1_pt"] = sz_of("Heading1")
+    checks["heading1_pt_expected"] = role["sizes"].get("heading1")
+    normal = style_block("Normal")
+    m = re.search(r'w:firstLineChars="(\d+)"', normal)
+    checks["normal_first_line_chars"] = int(m.group(1)) / 100 if m else None
+    checks["normal_first_line_chars_expected"] = role["first_line_indent_chars"]
+    m = re.search(r'<w:pgSz w:w="(\d+)" w:h="(\d+)"', docxml)
+    w_tw = int(m.group(1)) if m else 0
+    h_tw = int(m.group(2)) if m else 0
+    checks["page_mm"] = [round(w_tw / MM_TO_TWIPS, 1), round(h_tw / MM_TO_TWIPS, 1)]
+    checks["page_mm_expected"] = list(PAGE_SIZES.get(role["page"].get("size", "A4"), PAGE_SIZES["A4"]))
+    m = re.search(r'<w:pgMar [^>]*w:top="(\d+)"[^>]*w:bottom="(\d+)"[^>]*w:left="(\d+)"[^>]*w:right="(\d+)"', docxml)
+    checks["margins_mm"] = [round(int(m.group(i)) / MM_TO_TWIPS, 1) for i in range(1, 5)] if m else None
+    checks["no_blue_headings"] = "0F4761" not in styles
+    footer_parts = [n for n in names if re.match(r"word/footer\d*\.xml", n)]
+    checks["footer_page_field"] = any("PAGE" in z.read(n).decode("utf-8", "ignore") for n in footer_parts)
+    checks["header_placeholder"] = any("{{PAPER_TITLE}}" in z.read(n).decode("utf-8", "ignore")
+                                       for n in names if re.match(r"word/header\d*\.xml", n))
+    tbl = style_block("Table")
+    checks["table_three_line"] = "tblBorders" in tbl and tbl.count('w:val="single"') >= 2
+
+    ok = (
+        checks["title_pt"] == checks["title_pt_expected"]
+        and checks["heading1_pt"] == checks["heading1_pt_expected"]
+        and checks["normal_first_line_chars"] == checks["normal_first_line_chars_expected"]
+        and checks["page_mm"] == checks["page_mm_expected"]
+        and checks["margins_mm"] == [25.4, 25.4, 25.4, 25.4]
+        and checks["no_blue_headings"]
+        and checks["footer_page_field"]
+        and checks["header_placeholder"]
+    )
+    return {"checks": checks, "pass": bool(ok)}
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Generate reference docx from layout profiles")
+    ap.add_argument("--profile", default="all", help="profile name from registry, or 'all'")
+    ap.add_argument("--check", action="store_true",
+                    help="verify checked-in refdocs match the profiles; do not write")
+    args = ap.parse_args()
+
+    registry = layoutlib.load_registry()
+    names = sorted(registry["profiles"]) if args.profile == "all" else [args.profile]
+    base = default_reference_bytes()
+    results: dict[str, object] = {}
+    failed = False
+    for name in names:
+        entry = registry["profiles"].get(name)
+        if entry is None:
+            print(json.dumps({"status": "error", "profile": name,
+                              "error": f"not in registry {sorted(registry['profiles'])}"},
+                             ensure_ascii=False))
+            failed = True
+            continue
+        out_path = layoutlib.GOV_ROOT / "templates" / "layout" / entry["refdoc"]
+        try:
+            data, checks = build_refdoc(name, base)
+        except Exception as exc:  # noqa: BLE001
+            print(json.dumps({"status": "error", "profile": name, "error": str(exc)},
+                             ensure_ascii=False))
+            failed = True
+            continue
+        record = {"path": str(out_path.relative_to(layoutlib.GOV_ROOT)),
+                  "bytes": len(data), "self_check": checks}
+        if args.check:
+            current = out_path.read_bytes() if out_path.exists() else None
+            record["in_sync"] = current == data
+            if current != data:
+                failed = True
+        else:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(data)
+        results[name] = record
+        if not checks["pass"]:
+            failed = True
+    print(json.dumps({"status": "error" if failed else "ok",
+                      "mode": "check" if args.check else "write",
+                      "profiles": results,
+                      "generated_at": datetime.now(timezone.utc).isoformat()},
+                     ensure_ascii=False, indent=2))
+    return 2 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

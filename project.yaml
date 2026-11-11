@@ -1,6 +1,6 @@
 schema_version: 1
 project_id: paperfactory
-rules_version: 0.1.0
+rules_version: 0.2.0
 stage: foundation
 language: zh
 
@@ -38,6 +38,10 @@ modes:
     name: Review Mode
     description: "Automated review: style, wording, academic standards"
     status: implemented
+  - id: polish
+    name: Polish Mode
+    description: Controlled refinement of a written body (logic, wording, terminology, venue compliance) without new facts; stage carrier is the schema slot `revision` # rules landed 2026-11-11 (GC-2026-1111-03); awaiting first execution
+    status: planned
 
 # Orchestration
 orchestration:
@@ -74,6 +78,7 @@ capabilities:
   experiments: implemented
   writing: implemented
   review: implemented
+  polish: partial
   build_docx: implemented
   build_pdf: implemented
   version_bump: implemented

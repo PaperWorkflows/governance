@@ -13,13 +13,13 @@ This file defines version numbering, repository structure, commit scoping, and r
 
 ### PF-V2 独立版本号
 
-- `paper.yaml.paper_version` is per-paper independent scientific version using `major.minor.patch` (three non-negative integers).
-- Initial draft: `0.1.0`. First accepted release: `1.0.0`.
-- `major`: research question, core method, or core conclusion changes substantially (old version's core argument cannot be directly carried forward).
-- `minor`: core framework holds; new methods, evidence, experiments, or qualified conclusions added.
-- `patch`: wording, annotations, typesetting, or non-conclusion-affecting corrections.
+- `paper.yaml.paper_version` is per-paper independent scientific version using SemVer 2.0.0 format `vMAJOR.MINOR.PATCH`.
+- Initial draft: `v0.1.0`. First accepted release: `v1.0.0`.
+- **MAJOR**: research question, core method, or core conclusion changes substantially (old version's core argument cannot be directly carried forward).
+- **MINOR**: core framework holds; new methods, evidence, experiments, or qualified conclusions added.
+- **PATCH**: wording, annotations, typesetting, or non-conclusion-affecting corrections.
 - Evidence changes sufficient to overturn or change core conclusions cannot be patch.
-- After higher-order increment, lower orders reset to zero. Not based on word count, line count, or task count. 0.x research-phase substantive changes use minor.
+- After higher-order increment, lower orders reset to zero. Not based on word count, line count, or task count.
 
 ### PF-V3 版本号变更记录
 

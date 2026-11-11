@@ -10,7 +10,7 @@
 
 - rules_version：0.1.0（project.yaml 与 governance/rule-index.yaml 一致），本变更后保持 0.1.0——本变更不修改任何规则正文与 rule-index.yaml 条目，仅补实现载体与执行状态；若独立验证判定需 bump，须另行变更记录。
 - git 基线：instruction.git（master）截至本记录起草时**尚无任何提交**，全部治理文件为未跟踪工作树文件，故无更早 HEAD hash 可引；本变更以该工作树状态为基线，本记录所列文件将随首个治理提交入库。
-- 论文侧基线：P1-SETDEBATE-20251110、P2-LAYERGOV-20251110、P3-SPATIAL-20251110 均 paper_version 0.3.1，各自完成 REL-0001（P3 另有 REL-0002）docx+pdf 构建，产物在各论文 output/REL-*（含 current.json）。
+- 论文侧基线：P1-SETDEBATE-20251110、P2-LAYERGOV-20251110、P3-SPATIAL-20251110 均 paper_version v0.3.1，各自完成 v1.1.1 样式版本号制度重构；历史 REL 构建产物保留在 output/REL-*，新制度产物存放于 build/<version>/（含 current.json）。
 
 ## 2. 精确变更清单（逐文件）
 
@@ -18,7 +18,7 @@
 |---|---|---|---|
 | 1 | `project.yaml` | 修改 | `modes.research.status` 与 `modes.writing.status` 由 `planned` 改为 `implemented`，并在两者 description 行尾加注释 `# verified via P1/P2/P3 pipeline 2026-11-11`；`capabilities` 各项（均已 implemented）与其余字段不动 |
 | 2 | `templates/layout/registry.yaml` | 新建 | PF-B10 三层版式实现注册表：结构说明注释 + `schema_version` + `profiles.draft`（`file: profiles/draft.yaml`、`kind: draft`、`layer: L0`、`description: L0 project draft profile`）；注释载明 L1 venue profile 扩展约定与 `layout_profile` 指向校验口径 |
-| 3 | `templates/layout/profiles/draft.yaml` | 新建 | L0 draft profile：`profile: draft`、`kind: draft`、`page`（A4、25.4mm 四边边距）、`typography`（`body_pt: 12`、`line_spacing: 1.5`、`east_asia_font: "Noto Serif SC"`；`latin_font` 缺省并以注释说明回退口径） |
+| 3 | `templates/layout/profiles/draft.yaml` | 新建 | L0 draft profile：`profile: draft`、`kind: draft`、`page`（A4、25.4mm 四边边距）、`typography`（`body_pt: 12`、`line_spacing: 1.5`、`east_asia_font: "新宋体"`、`latin_font: "Times New Roman"`；跨平台说明见文件注释） |
 | 3a | `schemas/layout-profile.schema.json` | 修改 | 增加可选对象键 `typography`（子键 `body_pt`/`line_spacing`/`east_asia_font`/`latin_font`，全部 optional、带 description、子级 `additionalProperties: false`）；顶层 `required`/`additionalProperties` 不动；纯增量扩展 |
 | 4 | `templates/paper/build/layout.yaml` | 修改 | 修复散文缺陷：原第 3–4 行散文未加 `#`，整文件解析为字符串标量；重写为合法 YAML 对象（`profile: draft`、`kind: paper`、`page` A4 + 25.4mm×4），与三篇论文修复版一致；原散文转注释并登记缺陷说明 |
 | 5 | `SKELETON-PLAN.md` | 修改 | 仅第 9 节状态表"构建管道（docx/PDF）"与"审核派发"两行由"🔴 未实现"改为"✅ 已实现"并注明证据（P1/P2/P3 构建与审核闭环、GC 编号）；其余行（含 MCP/Skill、.gitignore 模板、references/ 子目录）不动 |

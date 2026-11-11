@@ -11,16 +11,19 @@
 # （见各论文 reviews/20261111-round2/closure.md），本文件为模板层同型修复，
 # 与论文修复版保持一致。
 #
-# 默认值：A4、25.4mm 四边边距来自 L0 draft profile（templates/layout/profiles/draft.yaml，
-# 经 templates/layout/registry.yaml 登记）；typography（12pt 正文、1.5 倍行距、东亚字体）
-# 亦由 L0 档位承载，本层无需重复；确需覆写 typography 时在本文件按键覆盖（PF-B3 可覆盖键）。
+# GC-2026-1111-02 修订：L2 层**只保留选择键**。
+#   - profile：选择 L1 venue profile（须与 paper.yaml.layout_profile 一致，否则构建失败）
+#   - kind：固定为 paper
+#   结构身份键（page / citation / formulas / target_venue）在 L2 出现即构建失败
+#   （PF-B3：不可被 paper config 覆盖；变更须走 profile 版本化）。
+#   上一版本在本文件重复声明 A4 / 25.4mm 边距（即结构身份键 page），与 PF-B3 冲突，
+#   已移除；页边距等由 L0/L1 profile 统一给出。
+#
+# 论文确需覆写版式时，只能覆写 typography 的可覆盖键（如 body_pt、line_spacing），
+# 例如：
+#   typography:
+#     body_pt: 10.5
+# 每次覆写都会在构建日志中记录 old / new / source-layer（PF-B10）。
 
-profile: draft
+profile: stie
 kind: paper
-page:
-  size: A4
-  margin:
-    top: 25.4
-    bottom: 25.4
-    left: 25.4
-    right: 25.4

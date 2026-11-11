@@ -1,5 +1,5 @@
 schema_version: 1
-rules_version: 0.1.0
+rules_version: 0.2.0
 notice: Structure parseable does not prove rules executed; current tools only check index and file structure.
 
 rules:
@@ -148,6 +148,14 @@ rules:
     file: governance/writing.md
     title: Claim-Evidence Correspondence and Limitations
     review_roles: [R-A, R-B]
+  - id: PF-W11
+    file: governance/writing.md
+    title: Target Venue Format Constraints
+    review_roles: [R-A, R-C]
+  - id: PF-W12
+    file: governance/writing.md
+    title: Target Venue Precedence
+    review_roles: [governance, R-A]
 
   - id: PF-B1
     file: governance/build.md
@@ -189,6 +197,22 @@ rules:
     file: governance/build.md
     title: Layout Profile Layering
     review_roles: [R-D]
+  - id: PF-B11
+    file: governance/build.md
+    title: Layout Implementation Carrier
+    review_roles: [R-D]
+  - id: PF-B12
+    file: governance/build.md
+    title: Layout Landing Verification
+    review_roles: [R-D]
+  - id: PF-B13
+    file: governance/build.md
+    title: L2 Override Boundary
+    review_roles: [R-D]
+  - id: PF-B14
+    file: governance/build.md
+    title: Layout Value Provenance
+    review_roles: [governance, R-D]
 
   - id: PF-RV1
     file: governance/review.md
@@ -214,6 +238,10 @@ rules:
     file: governance/review.md
     title: Fix Closure
     review_roles: [governance, independent_reviewer]
+  - id: PF-RV7
+    file: governance/review.md
+    title: Target Venue Format Compliance Review
+    review_roles: [R-A, R-D]
 
   - id: PF-V1
     file: governance/versions.md
@@ -255,3 +283,57 @@ rules:
     file: governance/versions.md
     title: Paper Repository Independence
     review_roles: [governance]
+
+  # ── Polish mode rules (governance/polish.md, GC-2026-1111-03) ──
+  - id: PF-PL1
+    file: governance/polish.md
+    title: Admission and Isolation
+    review_roles: [governance]
+  - id: PF-PL2
+    file: governance/polish.md
+    title: Terminology Pre-constraints
+    review_roles: [governance, R-C]
+  - id: PF-PL3
+    file: governance/polish.md
+    title: Global Logic Diagnosis and Track Decision
+    review_roles: [R-A]
+  - id: PF-PL4
+    file: governance/polish.md
+    title: Polish Execution Constraints
+    review_roles: [R-A, R-C]
+  - id: PF-PL5
+    file: governance/polish.md
+    title: Rewrite Track
+    review_roles: [governance]
+  - id: PF-PL6
+    file: governance/polish.md
+    title: Writer-Reviewer Separation and Parallel Control
+    review_roles: [governance]
+  - id: PF-PL7
+    file: governance/polish.md
+    title: Semantic Diff Verification
+    review_roles: [R-C]
+  - id: PF-PL8
+    file: governance/polish.md
+    title: Paragraph Transition Editing
+    review_roles: [R-C]
+  - id: PF-PL9
+    file: governance/polish.md
+    title: Merge Regression
+    review_roles: [governance]
+  - id: PF-PL10
+    file: governance/polish.md
+    title: Artifacts and Closure
+    review_roles: [governance]
+  - id: PF-PL11
+    file: governance/polish.md
+    title: Invalidation and Escalation
+    review_roles: [governance]
+  - id: PF-PL12
+    file: governance/polish.md
+    title: Workload and Sustainability
+    review_roles: [governance]
+  - id: PF-PL13
+    file: governance/polish.md
+    title: Venue Writing-Standard Polish
+    review_roles: [R-A, R-C]

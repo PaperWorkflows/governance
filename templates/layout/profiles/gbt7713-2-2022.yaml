@@ -1,0 +1,127 @@
+# L1 National Baseline Profile：GB/T 7713.2-2022《学术论文编写规则》（经 registry 登记）
+#
+# 定位：中文期刊通用国标基线档（L1）。适用于"目标刊未提供版式参数、且无更专 venue 档"的场景。
+# 数值来源（逐项）：
+#   - 字号/字体角色表：GB/T 7713.2-2022 附录 B 表 B.1（资料性附录，"可参考"）
+#   - 首行缩进 2 字符：GB/T 7713.1-2025 §6.5.2
+#   - 标题编号顶格/空一字/末尾不加点：GB/T 7713.2-2022 §5.2.2
+#   - 图题在下、表题在上：GB/T 7713.2-2022 §5.4.3 / §5.5.3
+#   - 公式居中、编号右对齐：GB/T 7713.2-2022 §5.7.4
+#   - 三线表制式：CY/T 170-2019 §5.2（线宽非国标——取期刊模板实测：软件学报 1.0/0.5pt）
+#   - 页码固定位置/页眉：GB/T 3179-2009 §8.6 / §9.2
+#   - 段前段后 0：通行做法（无单一权威源，APA/IEEE/ACM 均为 0）
+# 注意：附录 B 不含行距、页边距、页码字号——页边距沿用 L0 草案 25.4mm，行距沿用 1.5。
+# 覆写关系：本档按 PF-B10 覆盖 L0（draft）；论文 L2 只可再覆写 typography 可覆盖键。
+
+profile: gbt7713-2-2022
+kind: venue
+target_venue: GB/T 7713.2-2022 国标基线
+page:
+  size: A4                              # GB/T 7713.2-2022 §5.1.2（宜用 A4）
+  margin:
+    top: 25.4
+    bottom: 25.4
+    left: 25.4
+    right: 25.4
+typography:
+  body_pt: 10.5                         # 附录 B 表 B.1：正文五号宋体
+  line_spacing: 1.5                     # 附录 B 未规定；沿用 L0
+  east_asia_font: "宋体"                # 附录 B：正文宋体
+  latin_font: "Times New Roman"
+  first_line_indent_chars: 2            # GB/T 7713.1-2025 §6.5.2
+  fonts:
+    title_east_asia: "黑体"             # 附录 B：中文题名黑体
+    author_east_asia: "楷体"            # 作者姓名楷体
+    affiliation_east_asia: "宋体"       # 工作单位小五宋体
+    abstract_east_asia: "仿宋"          # 摘要内容仿宋（标签黑体）
+    heading_east_asia: "黑体"           # 章节标题黑体
+    caption_east_asia: "黑体"           # 图表题黑体
+    math_latin: "Cambria Math"
+    code_latin: "Consolas"
+  sizes:
+    title_zh: 18                        # 小二（附录 B）
+    title_en: 14                        # 四号（附录 B）
+    author: 12                          # 小四（附录 B）
+    affiliation: 9                      # 小五（附录 B）
+    abstract: 9                         # 小五（附录 B）
+    abstract_label: 9
+    keywords: 9
+    heading1: 12                        # 小四（章，附录 B）
+    heading2: 10.5                      # 五号（节，附录 B）
+    heading3: 10.5                      # 附录 B 未给三级 → 同节号
+    heading4: 10.5
+    heading5: 10.5
+    body: 10.5                          # 五号（附录 B）
+    caption: 9                          # 小五（附录 B）
+    table_body: 9
+    table_note: 9
+    reference_heading: 12               # 小四（附录 B）
+    reference_entry: 9                  # 小五（附录 B）
+    footnote: 7.5
+    author_bio: 9                       # 附录 B 无对应 → "其他项目"档
+    funding: 9
+    page_number: 7.5
+    header: 9
+    code: 10.5
+  paragraph:
+    alignment: justify
+    spacing_before_pt: 0
+    spacing_after_pt: 0
+  heading_numbering:                    # GB/T 7713.2-2022 §5.2.2
+    max_level: 4                        # §5.2.2：章节一般不宜超过 4 级
+    recommended_max_level: 3
+    formats: ["%1", "%1.%2", "%1.%2.%3", "（%4）"]
+    indent: flush_left
+    number_title_gap_chars: 1
+figures:
+  caption_position: below               # §5.4.3
+  caption_pt: 9
+  caption_alignment: center
+  text_first: true
+  cross_reference_required: true        # §5.2.4
+tables:
+  caption_position: above               # §5.5.3
+  caption_pt: 9
+  caption_alignment: center
+  style: three_line                     # CY/T 170-2019 §5.2
+  border_widths_pt:
+    top: 1.0
+    header: 0.5
+    bottom: 1.0
+  body_pt: 9
+  header_alignment: center              # CY/T 170 §7.2.2.2
+  note_position: below_table            # CY/T 170 §7.2.3.1
+formulas:
+  renderer: omml
+  editable_required: true               # §5.2（公式不得仅以图片提供；GB/T 7713.2 §5.7 体系）
+  display: centered                     # §5.7.4
+  numbering: right_paren                # §5.7.4
+  symbol_styles:                        # §5.3.3/§5.3.5 + GB 3100—3102
+    variable: italic
+    unit: upright
+    function: upright
+    matrix_vector_tensor: bold_italic
+    number_set: bold_upright
+citation:
+  style: gb-7714-2025                   # 现行版著录规则（标引制式由 venue 指定，国标基线默认顺序编码）
+  system: numeric
+references:
+  order: [appearance]
+  heading_pt: 12
+  entry_pt: 9
+  hanging_indent: true                  # GB/T 7713.2 附录 B 字号 + 期刊模板实测
+  hanging_indent_cm: 0.74
+  entry_spacing_pt: 0
+pagination:
+  page_number_position: footer_center   # GB/T 3179-2009 §8.6
+  header: title_center                  # §9.2
+  header_pt: 9
+punctuation:                            # GB/T 15834-2011
+  dash_em: 2
+  ellipsis_em: 2
+  interpunct_em: 0.5
+  line_end_compression: half_width
+author_bio_layout:
+  pt: 9
+  first_line_indent_chars: 2
+  one_paragraph_per_author: true

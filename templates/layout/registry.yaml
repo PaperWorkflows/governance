@@ -8,11 +8,15 @@
 # 每个 profile 文件必须通过 schemas/layout-profile.schema.json 校验
 # （additionalProperties: false，未知键构建失败）。语义以 governance/build.md 为准。
 #
-# 结构身份键（profile/kind/target_venue/page/citation/formulas）不可被 paper config 覆盖；
-# typography 为 PF-B3 明示可覆盖键（12pt 正文、1.5 倍行距 overridable），不属于结构身份键。
+# 结构身份键（page/citation/formulas/target_venue）不可被 paper config（L2）覆盖——
+# L2 中出现即构建失败（GC-2026-1111-02 后明确）；profile/kind 为 L2 合法选择键。
+# typography 为 PF-B3 明示可覆盖键（12pt 正文、1.5 倍行距 overridable）。
 #
-# L1 venue profile 扩展约定：目标刊会确认后，在 profiles/ 下新增 <venue-id>.yaml
-# （kind: venue、含 target_venue），并在下方 profiles: 登记同名条目。
+# refdoc（实现载体，PF-B3 增补条款）：每个 profile 的 reference docx 由
+# tools/make_refdoc.py 从 profile 生成（单一真值源，禁止手改）；条目登记其相对路径。
+# registry 条目的 refdoc 文件不存在时构建显式失败，禁止静默回退 pandoc 默认 reference doc。
+# profile 变更后须重新生成 refdoc 并将 diff 纳入变更记录。
+#
 # paper.yaml 的 layout_profile 指向的键必须在本注册表存在，否则构建失败。
 
 schema_version: 1
@@ -21,4 +25,17 @@ profiles:
     file: profiles/draft.yaml
     kind: draft
     layer: L0
-    description: L0 project draft profile
+    refdoc: refdoc/draft.docx
+    description: L0 project draft profile（A4/25.4mm/12pt 草案档；角色表按 GB/T 7713.2-2022 附录 B 铺底）
+  gbt7713-2-2022:
+    file: profiles/gbt7713-2-2022.yaml
+    kind: venue
+    layer: L1
+    refdoc: refdoc/gbt7713-2-2022.docx
+    description: L1 国标基线档（中文期刊通用；正文五号宋体、题名小二黑体、三线表、页脚居中页码）
+  stie:
+    file: profiles/stie.yaml
+    kind: venue
+    layer: L1
+    refdoc: refdoc/stie.docx
+    description: L1 venue 档：《数智技术研究与应用》专刊（P1-P7 目标刊；S1-S20 硬约束 + 国标回落，来源等级逐项标注）

@@ -229,17 +229,20 @@ authors:
 
 ## 6. 版本号管理
 
-| 版本 | 含义 | 示例 |
-|---|---|---|
-| `0.1.0` | 初稿 | 刚 scaffold 完成 |
-| `0.x.0` | 研究期 minor（核心框架成立，新增内容） | 增加实验数据 |
-| `1.0.0` | 首份通过全部验收的成稿 | 写完 + 审核通过 + 构建通过 |
-| `x.0.0` | major（研究问题/核心方法/核心结论实质改变） | 重做实验推翻结论 |
-| `x.x.1` | patch（措辞、排版、不影响结论的纠错） | 修正错别字、图表 |
+采用语义化版本（SemVer 2.0.0），格式为 `vMAJOR.MINOR.PATCH`：
 
-- changelog 通过 commit message 体现
+| 版本段 | 含义 | 触发条件 | 示例 |
+|---|---|---|---|
+| **MAJOR** | 不兼容的研究结论/核心方法变更 | 重做实验推翻结论、研究问题变更 | `v2.0.0` |
+| **MINOR** | 新增实质性内容，向后兼容 | 新增实验、新增章节、重大修订 | `v1.1.0` |
+| **PATCH** | 向后兼容的问题修复 | 措辞修正、图表修正、格式修复 | `v1.1.1` |
+
+- 初始化：论文从 `v0.1.0`（scaffold）开始
+- 首份通过全部验收的成稿升至 `v1.0.0`
 - 升级高位后低位归零
-- `paper_version` 在 `paper.yaml` 中维护，独立于 `rules_version`
+- changelog 通过 commit message 体现
+- `paper_version` 在 `paper.yaml` 中维护（带 `v` 前缀），独立于 `rules_version`
+- 纯工具链迁移、排版调整等不影响科学结论的变更，不自动触发版本号变更
 
 ---
 
@@ -285,7 +288,7 @@ authors:
 | scaffold 工具 | ✅ 已实现 | 创建论文工作区、git init、设置 remote |
 | check 工具 | ✅ 已实现 | 校验 paper.yaml、必需路径、git 仓库 |
 | version-bump 工具 | ✅ 已实现 | major/minor/patch 自动升级 |
-| 构建管道（docx/PDF） | ✅ 已实现 | P1/P2/P3 全流水线执行验证：三篇论文均完成 REL-0001 docx+pdf 构建（P3 另有 REL-0002 视觉修复重建），paper_version 0.3.1，产物在各自 output/REL-*（GC-2026-1111-01，2026-11-11；注：paper.py build 子命令与 PF-B9 过滤器仍未落地，见治理变更记录开放项） |
+| 构建管道（docx/PDF） | ✅ 已实现 | P1/P2/P3 全流水线执行验证：三篇论文均完成 v1.1.1 样式版本号制度重构，产物存放规则改为 `build/<version>/`；三篇 REL 构建记录在各自 output/REL-*（历史产物保留）和 build/ 下（GC-2026-1111-01，2026-11-11；注：paper.py build 子命令与 PF-B9 过滤器仍未落地，见治理变更记录开放项） |
 | 审核派发 | ✅ 已实现 | P1/P2/P3 四视角审核（R-A/R-B/R-C/R-D）+ PF-RV6 修复闭环执行验证：证据在各论文 reviews/20261111-round2/（closure.md 含 transferred-to-governance 清单）（GC-2026-1111-01，2026-11-11） |
 | MCP/Skill 配置 | 🔴 未实现 | 待 Phase 2 |
 | 论文仓库 .gitignore | 🟡 部分实现 | 模板中未包含，需补充 |

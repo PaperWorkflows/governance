@@ -1,28 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayoutProfile",
-  "description": "Structure-identity keys for a layout profile (L0/L1/L2). additionalProperties: false per PF-B3.",
+  "description": "Role-based layout profile (L0/L1/L2). additionalProperties: false per PF-B3. GC-2026-1111-02: extended from flat typography to a role/domain model; all pre-existing keys preserved, all new keys optional; missing role keys fall back to typography.body_pt / east_asia_font / latin_font (PF-B10).",
   "type": "object",
   "additionalProperties": false,
   "required": ["profile", "kind"],
   "properties": {
     "profile": {
       "type": "string",
-      "description": "Profile name or ID (structure-identity key, not overridable by paper config)"
+      "description": "Profile name or ID (structure-identity key; in L2 it is the selection key for the L1 venue profile and must match the registry)"
     },
     "kind": {
       "type": "string",
       "enum": ["draft", "venue", "paper"],
-      "description": "Profile kind (structure-identity key, not overridable by paper config)"
+      "description": "Profile kind (structure-identity key; L2 must use kind: paper)"
     },
     "target_venue": {
       "type": "string",
-      "description": "Target venue identifier (structure-identity key, not overridable by paper config)"
+      "description": "Target venue identifier (structure-identity key, L0/L1 only; presence in L2 fails build per PF-B3)"
     },
     "page": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Page geometry and margins",
+      "description": "Page geometry and margins (structure-identity key, L0/L1 only)",
       "required": ["size", "margin"],
       "properties": {
         "size": {
@@ -46,12 +46,12 @@
     "typography": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Typographic settings (optional). Per PF-B3 the draft defaults (12pt body, 1.5x line spacing) are overridable, so this key is NOT a structure-identity key and may be set by paper config.",
+      "description": "Typographic settings. Base keys (body_pt/line_spacing/east_asia_font/latin_font) are PF-B3 overridable; fonts/sizes/paragraph/heading_numbering are the role table (PF-B10 fallback rules apply).",
       "properties": {
         "body_pt": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "Body font size in points (draft default: 12)"
+          "description": "Body font size in points; also the fallback for every role size not set explicitly"
         },
         "line_spacing": {
           "type": "number",
@@ -60,36 +60,285 @@
         },
         "east_asia_font": {
           "type": "string",
-          "description": "East Asian (CJK) font family name (draft default: Noto Serif SC)"
+          "description": "East Asian (CJK) base font family; fallback for every east-asia role font not set explicitly"
         },
         "latin_font": {
           "type": "string",
-          "description": "Latin font family name (optional; omit to let the build toolchain fall back to its default serif)"
+          "description": "Latin base font family; fallback for every latin role font not set explicitly"
+        },
+        "first_line_indent_chars": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Body first-line indent in CJK character widths (e.g., 2 per GB/T 7713.1-2025 section 6.5.2)"
+        },
+        "fonts": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Role-scoped font families; keys omitted fall back to east_asia_font / latin_font",
+          "properties": {
+            "title_east_asia":       { "type": "string" },
+            "title_latin":           { "type": "string" },
+            "author_east_asia":      { "type": "string" },
+            "affiliation_east_asia": { "type": "string" },
+            "abstract_east_asia":    { "type": "string" },
+            "heading_east_asia":     { "type": "string" },
+            "heading_latin":         { "type": "string" },
+            "caption_east_asia":     { "type": "string" },
+            "table_body_east_asia":  { "type": "string" },
+            "reference_east_asia":   { "type": "string" },
+            "math_latin":            { "type": "string", "description": "Formula font (e.g., Cambria Math)" },
+            "code_latin":            { "type": "string", "description": "Monospace font for code" }
+          }
+        },
+        "sizes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Role font-size table in points; keys omitted fall back to body_pt",
+          "properties": {
+            "title_zh":          { "type": "number", "exclusiveMinimum": 0 },
+            "title_en":          { "type": "number", "exclusiveMinimum": 0 },
+            "author":            { "type": "number", "exclusiveMinimum": 0 },
+            "affiliation":       { "type": "number", "exclusiveMinimum": 0 },
+            "abstract":          { "type": "number", "exclusiveMinimum": 0 },
+            "abstract_label":    { "type": "number", "exclusiveMinimum": 0 },
+            "keywords":          { "type": "number", "exclusiveMinimum": 0 },
+            "heading1":          { "type": "number", "exclusiveMinimum": 0 },
+            "heading2":          { "type": "number", "exclusiveMinimum": 0 },
+            "heading3":          { "type": "number", "exclusiveMinimum": 0 },
+            "heading4":          { "type": "number", "exclusiveMinimum": 0 },
+            "heading5":          { "type": "number", "exclusiveMinimum": 0 },
+            "body":              { "type": "number", "exclusiveMinimum": 0 },
+            "caption":           { "type": "number", "exclusiveMinimum": 0 },
+            "table_body":        { "type": "number", "exclusiveMinimum": 0 },
+            "table_note":        { "type": "number", "exclusiveMinimum": 0 },
+            "reference_heading": { "type": "number", "exclusiveMinimum": 0 },
+            "reference_entry":   { "type": "number", "exclusiveMinimum": 0 },
+            "footnote":          { "type": "number", "exclusiveMinimum": 0 },
+            "author_bio":        { "type": "number", "exclusiveMinimum": 0 },
+            "funding":           { "type": "number", "exclusiveMinimum": 0 },
+            "page_number":       { "type": "number", "exclusiveMinimum": 0 },
+            "header":            { "type": "number", "exclusiveMinimum": 0 },
+            "code":              { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "paragraph": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "alignment": {
+              "type": "string",
+              "enum": ["justify", "left", "center"],
+              "description": "Body paragraph alignment"
+            },
+            "spacing_before_pt": { "type": "number", "minimum": 0 },
+            "spacing_after_pt":  { "type": "number", "minimum": 0 }
+          }
+        },
+        "heading_numbering": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_level":              { "type": "integer", "minimum": 1, "maximum": 9 },
+            "recommended_max_level":  { "type": "integer", "minimum": 1, "maximum": 9 },
+            "formats": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Per-level numbering format strings, e.g., [\"%1\", \"%1.%2\", \"%1.%2.%3\", \"（%4）\", \"⑤\"]"
+            },
+            "indent": {
+              "type": "string",
+              "enum": ["flush_left", "indented"],
+              "description": "Heading number alignment: flush_left per venue S8 / GB/T 7713.2 section 5.2.2"
+            },
+            "number_title_gap_chars": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Gap between number and title in CJK char widths (1 per GB/T 7713.2 section 5.2.2)"
+            }
+          }
+        }
+      }
+    },
+    "figures": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Figure caption and reference rules",
+      "properties": {
+        "caption_position": {
+          "type": "string",
+          "enum": ["above", "below"],
+          "description": "below per GB/T 7713.2-2022 section 5.4.3"
+        },
+        "caption_pt":               { "type": "number", "exclusiveMinimum": 0 },
+        "caption_alignment":        { "type": "string", "enum": ["center", "left", "justify"] },
+        "text_first":               { "type": "boolean", "description": "Text before figure/table in body (venue S11)" },
+        "cross_reference_required": { "type": "boolean", "description": "Every figure/table number must be cited in body (venue S11 / GB/T 7713.2 section 5.2.4)" }
+      }
+    },
+    "tables": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Table caption, body, and rule style",
+      "properties": {
+        "caption_position": {
+          "type": "string",
+          "enum": ["above", "below"],
+          "description": "above per GB/T 7713.2-2022 section 5.5.3 / CY/T 170-2019 section 7.2.1.1"
+        },
+        "caption_pt":            { "type": "number", "exclusiveMinimum": 0 },
+        "caption_alignment":     { "type": "string", "enum": ["center", "left", "justify"] },
+        "style": {
+          "type": "string",
+          "enum": ["three_line", "grid", "none"],
+          "description": "three_line per CY/T 170-2019 section 5.2"
+        },
+        "border_widths_pt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["top", "header", "bottom"],
+          "properties": {
+            "top":    { "type": "number", "exclusiveMinimum": 0 },
+            "header": { "type": "number", "exclusiveMinimum": 0 },
+            "bottom": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "body_pt":               { "type": "number", "exclusiveMinimum": 0 },
+        "header_alignment":      { "type": "string", "enum": ["center", "left"] },
+        "note_position":         { "type": "string", "enum": ["below_table", "above_table"] }
+      }
+    },
+    "formulas": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Formula rendering settings (structure-identity key, L0/L1 only)",
+      "required": ["renderer"],
+      "properties": {
+        "renderer": {
+          "type": "string",
+          "description": "Formula renderer identifier (e.g., omml for native Word equations)"
+        },
+        "editable_required": {
+          "type": "boolean",
+          "description": "Equations must be editable equation objects (OMML), images forbidden (venue S9)"
+        },
+        "display": {
+          "type": "string",
+          "enum": ["centered", "inline_text"],
+          "description": "Display equation alignment (centered per GB/T 7713.2-2022 section 5.7.4)"
+        },
+        "numbering": {
+          "type": "string",
+          "enum": ["right_paren", "right_dot_leader", "none"],
+          "description": "Equation numbering: right-aligned (1) per GB/T 7713.2-2022 section 5.7.4"
+        },
+        "symbol_styles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "variable":              { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
+            "unit":                  { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
+            "function":              { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
+            "matrix_vector_tensor":  { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
+            "number_set":            { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] }
+          },
+          "description": "Four-class symbol fonts per venue S10 / GB 3100-3102"
         }
       }
     },
     "citation": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Citation style settings (structure-identity key, not overridable by paper config)",
+      "description": "Citation style settings (structure-identity key, L0/L1 only)",
       "required": ["style"],
       "properties": {
         "style": {
           "type": "string",
-          "description": "Citation style identifier (e.g., gb-7714-2025)"
+          "description": "Citation style identifier (e.g., gb-7714-2025, gb-7714-author-date)"
+        },
+        "system": {
+          "type": "string",
+          "enum": ["numeric", "author_date"],
+          "description": "Reference marking system (venue S13: author_date)"
+        },
+        "entry_order": {
+          "type": "string",
+          "enum": ["author_year_first", "standard"],
+          "description": "Entry field order; venue S16 places author, year first (differs from GB/T 7714 default order)"
+        },
+        "standard_edition":       { "type": "string", "description": "e.g., GB/T 7714-2015 (as cited by venue) or GB/T 7714-2025 (current)" },
+        "standard_edition_note":  { "type": "string" },
+        "preferred_recency_years":{ "type": "integer", "minimum": 0, "description": "Prefer references published within N years (venue S13: 5)" },
+        "in_text_forms": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "In-text citation forms (venue S14); full-width for Chinese, half-width for English",
+          "properties": {
+            "zh_single":   { "type": "string" },
+            "zh_double":   { "type": "string" },
+            "zh_multi":    { "type": "string" },
+            "en_single":   { "type": "string" },
+            "en_double":   { "type": "string" },
+            "en_multi":    { "type": "string" },
+            "same_author_same_year_suffix": { "type": "string", "description": "e.g., a/b/c after year" },
+            "repeat_citation_page":         { "type": "string", "description": "superscript page after year" }
+          }
         }
       }
     },
-    "formulas": {
+    "references": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Formula rendering settings (structure-identity key, not overridable by paper config)",
-      "required": ["renderer"],
+      "description": "End-of-paper reference list typography",
       "properties": {
-        "renderer": {
+        "order": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["zh_by_pinyin", "en_by_surname", "appearance"] },
+          "description": "List ordering; venue S15: [zh_by_pinyin, en_by_surname] (Chinese first, then English)"
+        },
+        "heading_pt":        { "type": "number", "exclusiveMinimum": 0 },
+        "entry_pt":          { "type": "number", "exclusiveMinimum": 0 },
+        "hanging_indent":    { "type": "boolean" },
+        "hanging_indent_cm": { "type": "number", "exclusiveMinimum": 0 },
+        "entry_spacing_pt":  { "type": "number", "minimum": 0 }
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Page decoration",
+      "properties": {
+        "page_number_position": {
           "type": "string",
-          "description": "Formula renderer identifier"
-        }
+          "enum": ["footer_center", "footer_right", "header_right", "none"],
+          "description": "footer_center per GB/T 3179-2009 section 8.6"
+        },
+        "header": {
+          "type": "string",
+          "enum": ["title_center", "journal", "none"],
+          "description": "Running head: paper title centered per GB/T 3179-2009 section 9.2"
+        },
+        "header_pt": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "punctuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "CJK punctuation width rules (GB/T 15834-2011)",
+      "properties": {
+        "dash_em":               { "type": "number", "description": "Em width of dash —— (2)" },
+        "ellipsis_em":           { "type": "number", "description": "Em width of ellipsis …… (2)" },
+        "interpunct_em":         { "type": "number", "description": "Em width of interpunct · (0.5)" },
+        "line_end_compression":  { "type": "string", "enum": ["half_width", "full_width", "none"] }
+      }
+    },
+    "author_bio_layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Author-bio block typography (venue S17 role)",
+      "properties": {
+        "pt":                     { "type": "number", "exclusiveMinimum": 0 },
+        "first_line_indent_chars":{ "type": "number", "minimum": 0 },
+        "one_paragraph_per_author": { "type": "boolean" }
       }
     }
   }

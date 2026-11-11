@@ -52,3 +52,11 @@ This file defines the review mode execution rules. Review mode covers: four-pers
 - After body, literature, data, code, figures, authorship, config, toolchain, or layout changes, subagent checks impact and复审 affected items. Cannot reuse expired reports.
 - Final report binds to current complete snapshot and re-verification relationships.
 - Delivery requires: applicable rules verified, P0/P1 all closed, P2 disposition recorded, and both T-rule artifacts with visual verification complete.
+
+### PF-RV7 目标刊格式合规复核
+
+- Reviewers verify the paper against the venue constraints recorded in `writing-spec.yaml` (PF-W11), and against the layout profile selected in `paper.yaml.layout_profile` (PF-B11/PF-B12).
+- Mechanical checks (title length and punctuation, abstract length and forbidden subject forms, keyword count and separator, presence of the English abstract and keyword blocks, funding note ordering, corresponding-author marking, author biography fields) are executed and recorded with actual values, not asserted.
+- Advisory constraints are reported against their tolerance band; exceeding an advisory constraint is P2 unless the venue's own text makes it binding.
+- The layout side is verified against the built artifacts: page geometry, body font and size, heading hierarchy, table rule style, caption placement, page numbering, and the absence of residual default styling. Deviations that the build did not already flag are P1.
+- Findings cite the venue clause or the profile key they rest on. Where a value originates from a fallback rather than the venue, the report must say so (PF-B14).

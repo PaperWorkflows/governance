@@ -1,0 +1,146 @@
+# L1 Venue Profile：《数智技术研究与应用》（"多模态时空大数据处理关键技术及应用研究"专刊）
+#
+# 依据：用户提供的该刊投稿格式要求全文（2026-11-11，编号 S1–S20，见各论文 writing-spec.yaml）。
+# 作用域：papers/ 下 P1–P7 共同目标刊（paper.yaml.layout_profile: stie）。
+#
+# 来源等级（source_level）约定——避免把"我们选的"当成"期刊要求的"：
+#   [S#]     本刊格式要求明示（S1–S20）
+#   [GB]     国标基线回落（本刊未规定）：GB/T 7713.2-2022 附录 B 表 B.1 等
+#   [CY]     行业标准：CY/T 170-2019
+#   [JT]     期刊模板实测（线宽等非国标项）
+#   [TD]     通行做法（无单一权威源）
+# 本刊明示文本完全未规定：字号、字体、页边距、行距、页码、图题字号、三线表线宽——
+# 这些一律回落国标基线并逐项标注；编辑部模板取得后以实测值覆盖（开放项）。
+#
+# 等级词表对照（PF-B14 注释式 provenance；本文件以缩写标注）：
+#   [S#]=venue_requirement  [GB]=national_standard(_advisory)  [CY]=industry_standard
+#   [JT]=journal_measured   [TD]=common_practice
+# 结构化 provenance 块（键级）为开放项；当前以注释标注 + 变更记录登记为准。
+
+# 覆写关系：本档覆盖 L0（draft）；论文 L2 只可再覆写 typography 可覆盖键。
+
+profile: stie
+kind: venue
+target_venue: 数智技术研究与应用
+page:
+  size: A4                              # [GB] GB/T 7713.2-2022 §5.1.2
+  margin:
+    top: 25.4                           # [TD] 本刊未规定；沿用项目默认
+    bottom: 25.4
+    left: 25.4
+    right: 25.4
+typography:
+  body_pt: 10.5                         # [GB] 附录 B 表 B.1：正文五号宋体
+  line_spacing: 1.5                     # [TD] 本刊未规定；沿用 L0
+  east_asia_font: "宋体"                # [GB] 附录 B
+  latin_font: "Times New Roman"         # [TD] 中文期刊惯例（本刊未规定）
+  first_line_indent_chars: 2            # [GB] GB/T 7713.1-2025 §6.5.2
+  fonts:
+    title_east_asia: "黑体"             # [GB] 附录 B：题名小二黑体
+    author_east_asia: "楷体"            # [GB] 附录 B：作者小四楷体
+    affiliation_east_asia: "宋体"       # [GB] 附录 B：单位小五宋体；行内格式见 S2（writing-spec）
+    abstract_east_asia: "仿宋"          # [GB] 附录 B：摘要内容小五仿宋（标签黑体）
+    heading_east_asia: "黑体"           # [GB] 附录 B：章小四/节五号黑体
+    caption_east_asia: "黑体"           # [GB] 附录 B：图表题小五黑体
+    math_latin: "Cambria Math"          # [S9] 公式编辑器（Word 自带）；本刊"图/表制作规范"正文为空 → 图内规格回落 [GB]
+    code_latin: "Consolas"              # [TD]
+  sizes:                                # 全部 [GB] 附录 B 表 B.1（本刊未规定任何字号）
+    title_zh: 18                        # 小二黑体（题名 ≤20 汉字时单行可容）
+    title_en: 14                        # 四号黑体
+    author: 12                          # 小四楷体
+    affiliation: 9                      # 小五宋体
+    abstract: 9                         # 小五仿宋
+    abstract_label: 9                   # 小五黑体标签
+    keywords: 9                         # 小五
+    heading1: 12                        # 小四黑体（章）
+    heading2: 10.5                      # 五号黑体（节）
+    heading3: 10.5                      # 附录 B 未给三级 → 同节号加粗区分
+    heading4: 10.5                      # [S8] （1）级
+    heading5: 10.5                      # [S8] ① 级
+    body: 10.5                          # 五号宋体
+    caption: 9                          # 小五黑体
+    table_body: 9                       # 小五宋体
+    table_note: 9
+    reference_heading: 12               # 小四黑体
+    reference_entry: 9                  # 小五宋体
+    footnote: 7.5
+    author_bio: 9                       # [S17] 角色新增；字号取附录 B"其他项目"档 [GB]
+    funding: 9                          # [GB] 附录 B"其他项目"
+    page_number: 7.5                    # [GB] GB/T 3179 §8.6（本刊未规定）
+    header: 9
+    code: 10.5
+  paragraph:                            # [TD] 段前段后 0
+    alignment: justify
+    spacing_before_pt: 0
+    spacing_after_pt: 0
+  heading_numbering:                    # [S8] 层次序号 1、1.1、1.1.1、（1）、①；顶格
+    max_level: 5
+    recommended_max_level: 3            # [S8] 层次不宜过多
+    formats: ["%1", "%1.%2", "%1.%2.%3", "（%4）", "①②③④⑤⑥⑦⑧⑨"]  # 第5级=带圈数字依次编号（S8）
+    indent: flush_left                  # [S8] 顶格排列
+    number_title_gap_chars: 1           # [GB] §5.2.2 空一字
+figures:
+  caption_position: below               # [GB] §5.4.3（本刊"图/表制作规范"正文为空）
+  caption_pt: 9                         # [GB] 附录 B
+  caption_alignment: center
+  text_first: true                      # [S11] 先文字后图表
+  cross_reference_required: true        # [S11] 正文引用处须提及图号/表号
+tables:
+  caption_position: above               # [GB] §5.5.3
+  caption_pt: 9
+  caption_alignment: center
+  style: three_line                     # [CY] CY/T 170-2019 §5.2
+  border_widths_pt:                     # [JT] 软件学报 2025 模板实测（线宽非国标）
+    top: 1.0
+    header: 0.5
+    bottom: 1.0
+  body_pt: 9                            # [GB] 附录 B
+  header_alignment: center              # [CY] §7.2.2.2
+  note_position: below_table            # [CY] §7.2.3.1
+formulas:
+  renderer: omml                        # [S9] 公式编辑器生成（Word 自带 = OMML），勿以图片插入
+  editable_required: true               # [S9] 图片公式 = 投稿件构建失败（research 稿记 limitation）
+  display: centered                     # [GB] §5.7.4 行间公式居中
+  numbering: right_paren                # [GB] §5.7.4 编号标注于行最右端
+  symbol_styles:                        # [S10] 四类字体（本刊专有细分）
+    variable: italic                    # ①斜体：变量、物理量
+    unit: upright                       # ②正体：单位、常量、函数名
+    function: upright
+    matrix_vector_tensor: bold_italic   # ③粗斜体：矩阵、向量、张量
+    number_set: bold_upright            # ④粗正体：R、Z、N
+citation:
+  style: gb-7714-author-date            # [S13] 本刊采用著者出版年制
+  system: author_date                   # [S13]
+  entry_order: author_year_first        # [S16] "著者，出版年." 开头（与 GB 默认顺序不同，以本刊为准）
+  standard_edition: "GB/T 7714-2015"    # [S13] 本刊文本引 2015 版
+  standard_edition_note: "现行版为 GB/T 7714-2025（2026-07-01 实施）；按本刊文本执行 2015 版著录格式，版次差异待编辑部确认（GC-2026-1111-02 开放项 2）"
+  preferred_recency_years: 5            # [S13] 建议优先引用 5 年内成果
+  in_text_forms:                        # [S14]（内容级核对清单见 PF-W11/PF-RV7；此处登记版式形式）
+    zh_single: "张三（2020）"           # 全角括号、无逗号
+    zh_double: "张三和李四（2020）"     # 著者间用"和"
+    zh_multi: "张等（2020）"            # "等"（不加顿号）
+    en_single: "(Smith, 2020)"          # 半角括号 + 半角逗号 + 半角空格
+    en_double: "(Smith & Chick, 2020)"  # 著者间用 &
+    en_multi: "(Smith et al., 2020)"    # et al.
+    same_author_same_year_suffix: "a/b/c"  # 年份后加 a、b、c
+    repeat_citation_page: "superscript"    # 出版年后角标著录引文页码
+references:
+  order: [zh_by_pinyin, en_by_surname]  # [S15] 先中文后英文，各按著者拼音/字母排序
+  heading_pt: 12                        # [GB] 附录 B
+  entry_pt: 9
+  hanging_indent: true                  # [GB] 附录 B + [JT]
+  hanging_indent_cm: 0.74
+  entry_spacing_pt: 0
+pagination:
+  page_number_position: footer_center   # [GB] GB/T 3179 §8.6（本刊未规定）
+  header: title_center                  # [GB] §9.2
+  header_pt: 9
+punctuation:                            # [GB] GB/T 15834-2011
+  dash_em: 2
+  ellipsis_em: 2
+  interpunct_em: 0.5
+  line_end_compression: half_width
+author_bio_layout:                      # [S17] 全员作者简介（内容字段清单在 writing-spec.yaml）
+  pt: 9
+  first_line_indent_chars: 2
+  one_paragraph_per_author: true

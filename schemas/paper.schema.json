@@ -32,8 +32,12 @@
     "repository_mode"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "template": { "const": false },
+    "schema_version": {
+      "const": 1
+    },
+    "template": {
+      "const": false
+    },
     "id": {
       "type": "string",
       "pattern": "^P[0-9]+$",
@@ -44,20 +48,35 @@
       "minLength": 1,
       "pattern": "\\S"
     },
+    "title_en": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "English title. Required by the target venue when bilingual_abstract is true (PF-W11 / venue S5); the English title, abstract and keywords must correspond to the Chinese ones.",
+      "minLength": 1
+    },
     "paper_version": {
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
     "repository_mode": {
       "const": "per_paper_independent"
     },
-    "authors_confirmed": { "type": "boolean" },
+    "authors_confirmed": {
+      "type": "boolean"
+    },
     "authors": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["author_id", "name", "affiliations", "roles"],
+        "required": [
+          "author_id",
+          "name",
+          "affiliations",
+          "roles"
+        ],
         "properties": {
           "author_id": {
             "type": "string",
@@ -82,13 +101,24 @@
           "roles": {
             "type": "array",
             "items": {
-              "enum": ["first", "second", "corresponding", "other"]
+              "enum": [
+                "first",
+                "second",
+                "corresponding",
+                "other"
+              ]
             }
           },
           "email": {
             "anyOf": [
-              { "type": "string", "minLength": 1, "pattern": "\\S" },
-              { "type": "null" }
+              {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         }
@@ -99,25 +129,45 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["source", "confirmed_on"],
+          "required": [
+            "source",
+            "confirmed_on"
+          ],
           "properties": {
-            "source": { "type": "string", "minLength": 1, "pattern": "\\S" },
-            "confirmed_on": { "type": "string", "minLength": 1, "pattern": "\\S" }
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "confirmed_on": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
           }
         },
-        { "type": "null" }
+        {
+          "type": "null"
+        }
       ]
     },
-    "language": { "const": "zh" },
-    "bilingual_abstract": { "const": true },
-    "full_english_body": { "const": false },
+    "language": {
+      "const": "zh"
+    },
+    "bilingual_abstract": {
+      "const": true
+    },
+    "full_english_body": {
+      "const": false
+    },
     "paper_type": {
       "enum": [
         "theory",
         "algorithm_experiment",
         "software_system",
         "empirical",
-        "mixed"
+        "mixed",
+        "design_science"
       ]
     },
     "stage": {
@@ -134,10 +184,19 @@
       ]
     },
     "stage_state": {
-      "enum": ["active", "paused", "blocked", "completed"]
+      "enum": [
+        "active",
+        "paused",
+        "blocked",
+        "completed"
+      ]
     },
     "manuscript_kind": {
-      "enum": ["research", "submission", "published_archive"]
+      "enum": [
+        "research",
+        "submission",
+        "published_archive"
+      ]
     },
     "rules_version": {
       "type": "string",
@@ -159,11 +218,27 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rule_id", "reason", "evidence"],
+        "required": [
+          "rule_id",
+          "reason",
+          "evidence"
+        ],
         "properties": {
-          "rule_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
-          "reason": { "type": "string", "minLength": 1, "pattern": "\\S" },
-          "evidence": { "type": "string", "minLength": 1, "pattern": "\\S" }
+          "rule_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
         }
       }
     },
@@ -174,34 +249,63 @@
     },
     "citation_profile": {
       "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "\\S" },
-        { "type": "null" }
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "target_venue": {
       "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "\\S" },
-        { "type": "null" }
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "budget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["confirmed", "limits"],
+      "required": [
+        "confirmed",
+        "limits"
+      ],
       "properties": {
-        "confirmed": { "type": "boolean" },
+        "confirmed": {
+          "type": "boolean"
+        },
         "limits": {
           "anyOf": [
-            { "type": "string", "minLength": 1, "pattern": "\\S" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       }
     },
     "isolation_profile": {
       "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "\\S" },
-        { "type": "null" }
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "unresolved": {
@@ -214,19 +318,54 @@
     },
     "next_step": {
       "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "\\S" },
-        { "type": "null" }
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "safety": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hooks", "isolation", "independent_backup", "publishing"],
+      "required": [
+        "hooks",
+        "isolation",
+        "independent_backup",
+        "publishing"
+      ],
       "properties": {
-        "hooks":       { "enum": ["pending", "disabled", "verified"] },
-        "isolation":   { "enum": ["pending", "disabled", "verified"] },
-        "independent_backup": { "enum": ["pending", "disabled", "verified"] },
-        "publishing":  { "enum": ["pending", "disabled", "verified"] }
+        "hooks": {
+          "enum": [
+            "pending",
+            "disabled",
+            "verified"
+          ]
+        },
+        "isolation": {
+          "enum": [
+            "pending",
+            "disabled",
+            "verified"
+          ]
+        },
+        "independent_backup": {
+          "enum": [
+            "pending",
+            "disabled",
+            "verified"
+          ]
+        },
+        "publishing": {
+          "enum": [
+            "pending",
+            "disabled",
+            "verified"
+          ]
+        }
       }
     },
     "body_target_chars": {
@@ -239,15 +378,25 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["number", "slug", "title"],
+        "required": [
+          "number",
+          "slug",
+          "title"
+        ],
         "properties": {
-          "number": { "type": "integer", "minimum": 1 },
+          "number": {
+            "type": "integer",
+            "minimum": 0
+          },
           "slug": {
             "type": "string",
             "minLength": 1,
             "pattern": "^[a-z][a-z0-9-]*$"
           },
-          "title": { "type": "string", "minLength": 1 }
+          "title": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "minItems": 1,
@@ -256,17 +405,39 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "authors_confirmed": { "const": true } }, "required": ["authors_confirmed"] },
+      "if": {
+        "properties": {
+          "authors_confirmed": {
+            "const": true
+          }
+        },
+        "required": [
+          "authors_confirmed"
+        ]
+      },
       "then": {
         "properties": {
-          "authors": { "minItems": 1 },
+          "authors": {
+            "minItems": 1
+          },
           "authors_confirmation": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["source", "confirmed_on"],
+            "required": [
+              "source",
+              "confirmed_on"
+            ],
             "properties": {
-              "source": { "type": "string", "minLength": 1, "pattern": "\\S" },
-              "confirmed_on": { "type": "string", "minLength": 1, "pattern": "\\S" }
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "confirmed_on": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
             }
           }
         }
@@ -276,17 +447,33 @@
       "if": {
         "properties": {
           "stage": {
-            "enum": ["research", "writing", "review", "revision", "build", "released", "archived"]
+            "enum": [
+              "research",
+              "writing",
+              "review",
+              "revision",
+              "build",
+              "released",
+              "archived"
+            ]
           }
         },
-        "required": ["stage"]
+        "required": [
+          "stage"
+        ]
       },
       "then": {
         "properties": {
           "budget": {
             "properties": {
-              "confirmed": { "const": true },
-              "limits": { "type": "string", "minLength": 1, "pattern": "\\S" }
+              "confirmed": {
+                "const": true
+              },
+              "limits": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
             }
           }
         }
