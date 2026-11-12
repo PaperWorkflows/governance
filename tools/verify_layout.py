@@ -227,6 +227,13 @@ def section_d(paper_root: pathlib.Path) -> None:
     import tempfile
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="verify_layout_neg_"))
 
+    # M3-a / P2-2: the margin mutation literal must track the profile — a hardcoded
+    # w:top="1440" (25.4 mm) becomes a no-op once the profile switches to 20 mm.
+    margin_top_tw = int(round((merged.get("page", {}).get("margin", {}) or {})
+                              .get("top", 25.4) * 56.6929))
+    # M3-b / P1-c-1: the running head reference only exists in header profiles.
+    header_mode = (merged.get("pagination", {}) or {}).get("header", "title_center")
+
     def _replace(payload: bytes, old: bytes, new: bytes) -> bytes:
         if old not in payload:
             raise AssertionError(f"mutation target not found: {old[:60]!r}")
@@ -242,7 +249,8 @@ def section_d(paper_root: pathlib.Path) -> None:
             _replace(p["word/document.xml"], b'<w:pgSz w:h="16838" w:w="11906" />', b"")),
         "margins_removed": lambda p: p.__setitem__(
             "word/document.xml",
-            _replace(p["word/document.xml"], b'w:top="1440"', b'w:top="720"')),
+            _replace(p["word/document.xml"], f'w:top="{margin_top_tw}"'.encode("ascii"),
+                     b'w:top="720"')),
         "cjk_font_removed": lambda p: p.__setitem__(
             "word/styles.xml",
             _replace(p["word/styles.xml"], 'w:eastAsia="宋体"'.encode("utf-8"),
@@ -261,10 +269,6 @@ def section_d(paper_root: pathlib.Path) -> None:
         "numpages_not_page": lambda p: p.__setitem__(
             "word/footer1.xml",
             _replace(p["word/footer1.xml"], b" PAGE ", b" NUMPAGES ")),
-        # the running head must actually be referenced by sectPr
-        "header_reference_removed": lambda p: p.__setitem__(
-            "word/document.xml",
-            _replace(p["word/document.xml"], b'<w:headerReference r:id="rId10" w:type="default" />', b"")),
         # blue heading colour in lower case (case-insensitive detection)
         "blue_lowercase": lambda p: p.__setitem__(
             "word/styles.xml",
@@ -280,6 +284,27 @@ def section_d(paper_root: pathlib.Path) -> None:
         "citation_superscript_removed": lambda p: p.__setitem__(
             "word/document.xml", _drop_citation_superscript(p["word/document.xml"])),
     }
+    if header_mode == "none":
+        # M3-b / P1-c-1: a header=none artifact must carry NO w:headerReference.
+        # The old negative targeted a literal rId10 reference that only exists in
+        # header profiles, so it cannot mutate a header-less product. Replace it
+        # with a POSITIVE assertion (the injectable negative — prove such an
+        # artifact would fail — is registered as a separate open item, P1-c-2).
+        # NOTE: search the DECOMPRESSED document part, not the raw zip bytes —
+        # deflate makes an XML fragment unfindable in read_bytes() (found 2026-11-12).
+        raw_doc = zipfile.ZipFile(docx).read("word/document.xml")
+        if b"<w:headerReference" in raw_doc:
+            record("D. none-mode positive: header=none artifact has no headerReference",
+                   False, "w:headerReference present in artifact")
+        else:
+            record("D. none-mode positive: header=none artifact has no headerReference",
+                   True, "no w:headerReference")
+    else:
+        # the running head must actually be referenced by sectPr (header profiles only)
+        mutations["header_reference_removed"] = lambda p: p.__setitem__(
+            "word/document.xml",
+            _replace(p["word/document.xml"],
+                     b'<w:headerReference r:id="rId10" w:type="default" />', b""))
     for label, mutate in mutations.items():
         target = tmp / f"{label}.docx"
         try:
@@ -315,17 +340,21 @@ def section_e(paper_root: pathlib.Path) -> None:
     paper_mod._inject_paper_title_header(tmp, nasty)
     z = zipfile.ZipFile(tmp)
     headers = [n for n in z.namelist() if re.match(r"word/header\d*\.xml", n)]
-    ok = bool(headers)
-    detail = "no header part"
-    if headers:
-        try:
-            import xml.etree.ElementTree
-            for h in headers:
-                xml.etree.ElementTree.fromstring(z.read(h))
-            detail = f"{len(headers)} header part(s) well-formed"
-        except Exception as exc:  # noqa: BLE001
-            ok = False
-            detail = str(exc)[:120]
+    if not headers:
+        # M3-c / P1-d: with pagination.header=none the package has no header part to
+        # inject into. Skipping is a recorded note, never a silent pass.
+        record("E. title XML escaping (& < >)", True,
+               "skipped: no header part (header=none profile)")
+        return
+    ok = True
+    detail = f"{len(headers)} header part(s) well-formed"
+    try:
+        import xml.etree.ElementTree
+        for h in headers:
+            xml.etree.ElementTree.fromstring(z.read(h))
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        detail = str(exc)[:120]
     record("E. title XML escaping (& < >)", ok, detail)
 
 

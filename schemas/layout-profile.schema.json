@@ -185,7 +185,8 @@
         "caption_pt":               { "type": "number", "exclusiveMinimum": 0 },
         "caption_alignment":        { "type": "string", "enum": ["center", "left", "justify"] },
         "text_first":               { "type": "boolean", "description": "Text before figure/table in body (venue S11)" },
-        "cross_reference_required": { "type": "boolean", "description": "Every figure/table number must be cited in body (venue S11 / GB/T 7713.2 section 5.2.4)" }
+        "cross_reference_required": { "type": "boolean", "description": "Every figure/table number must be cited in body (venue S11 / GB/T 7713.2 section 5.2.4)" },
+        "caption_bilingual":        { "type": "boolean", "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文图题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical." }
       }
     },
     "tables": {
@@ -215,6 +216,8 @@
             "bottom": { "type": "number", "exclusiveMinimum": 0 }
           }
         },
+        "header_fill":           { "type": "string", "pattern": "^(?:#[0-9A-Fa-f]{6}|none)$", "description": "Header-row cell background fill: a hex colour (e.g. \"#E5EBF0\") or \"none\". Absent = none (no w:shd written). Journal-measured 2026-11-12: 范文表头浅灰底 RGB(0.898,0.922,0.941) ≈ #E5EBF0, 黑字." },
+        "caption_bilingual":     { "type": "boolean", "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文表题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical." },
         "body_pt":               { "type": "number", "exclusiveMinimum": 0 },
         "header_alignment":      { "type": "string", "enum": ["center", "left"] },
         "note_position":         { "type": "string", "enum": ["below_table", "above_table"] }

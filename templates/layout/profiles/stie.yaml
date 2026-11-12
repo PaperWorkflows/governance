@@ -20,6 +20,10 @@
 #   [CY]=industry_standard  [JT]=journal_measured  [TD]=common_practice
 #   [SC]=self_chosen
 # 结构化 provenance 块（键级）为开放项；当前以注释标注 + 变更记录登记为准。
+#
+# 2026-11-12 变更说明：本档依据通过审稿范文（《基于可信数据空间的…跨域合规流通机制》v4.5(1).pdf）
+# 实测对齐（GC-2026-1112-05 前置实施；final-recommendations.md A/C 档）；字号类
+# （sizes.*、author_bio_layout.pt、页码字号等全部 pt 值）按用户裁定保持现值，本轮一律不动。
 
 # 覆写关系：本档覆盖 L0（draft）；论文 L2 只可再覆写 typography 可覆盖键。
 
@@ -28,11 +32,11 @@ kind: venue
 target_venue: 数智技术研究与应用
 page:
   size: A4                              # [GB] GB/T 7713.2-2022 §5.1.2
-  margin:                                # [SC] 本刊未规定；GB/T 7713.1-2025 §6.10 的 25/20mm 仅适用学位论文
-    top: 25.4
-    bottom: 25.4
-    left: 25.4
-    right: 25.4
+  margin:                                # [JT] 范文实测四边 20.32/20.32/19.54/19.97 mm ≈2cm（2026-11-12，final-recommendations.md A-1）
+    top: 20
+    bottom: 20
+    left: 20
+    right: 20
 typography:
   body_pt: 10.5                         # [GB] 附录 B 表 B.1：正文五号宋体
   line_spacing: 1.5                     # [SC] 本刊未规定、国标亦未规定；沿用 L0 草案档
@@ -92,18 +96,21 @@ figures:
   caption_alignment: center
   text_first: true                      # [S11] 先文字后图表
   cross_reference_required: true        # [S11] 正文引用处须提及图号/表号
+  caption_bilingual: true               # [JT] 范文图题中英成对（"图 N…"+"Fig. N…"，2026-11-12，final-recommendations.md C-2）；双语文本由写作层保证，题注样式不变
 tables:
   caption_position: above               # [GB] §5.5.3
   caption_pt: 9
   caption_alignment: center
   style: three_line                     # [CY] CY/T 170-2019 §5.2
-  border_widths_pt:                     # [JT] 软件学报 2025 模板实测（线宽非国标）
-    top: 1.0
-    header: 0.5
-    bottom: 1.0
+  border_widths_pt:                     # [JT] 本刊范文实测，替换 JT-软件学报（2026-11-12，A-5）；OOXML 1/8pt 粒度实际落地 1.5/0.75/1.5（L-5）
+    top: 1.44
+    header: 0.72
+    bottom: 1.44
   body_pt: 9                            # [GB] 附录 B
   header_alignment: center              # [CY] §7.2.2.2
   note_position: below_table            # [CY] §7.2.3.1
+  header_fill: "#E5EBF0"                # [JT] 范文表头浅灰底 RGB(0.898,0.922,0.941)≈#E5EBF0、黑字（2026-11-12，C-1）
+  caption_bilingual: true               # [JT] 范文表题中英成对（"表 N…"+"Table N…"，2026-11-12，C-2）；双语文本由写作层保证，题注样式不变
 formulas:
   renderer: omml                        # [S9] 公式编辑器生成（Word 自带 = OMML），勿以图片插入
   editable_required: true               # [S9] 图片公式 = 投稿件构建失败（research 稿记 limitation）
@@ -136,18 +143,18 @@ references:
   heading_pt: 12                        # [GB] 附录 B
   entry_pt: 9
   hanging_indent: true                  # [GB] 附录 B + [JT]
-  hanging_indent_cm: 0.74
+  hanging_indent_cm: 0.635              # [JT] 范文实测 18.0pt = 2字符 @9pt，360 twips 精确表达（2026-11-12，final-recommendations.md A-6）
   entry_spacing_pt: 0
 pagination:
   page_number_position: footer_center   # [SC] §8.6 只要求"固定位置"，未规定位置形态 → 自选回落
-  header: title_center                  # [SC] §9.2 只规定标志项目（题名），未规定位置 → 自选回落
-  header_pt: 9
+  header: none                          # [JT] 范文 20 页全无页眉（2026-11-12，A-3）。原值 title_center 保留为回滚候选：终排模板取得后若编辑部要求页眉，先回滚本键（L-3，回滚概率最高项）。schema 枚举已含 none
+  header_pt: 9                          # [SC] header=none 下闲置（A-3 连带死键）——保留待终排模板回滚时复用，本轮不改值
 punctuation:                            # [GB] GB/T 15834-2011
   dash_em: 2
   ellipsis_em: 2
   interpunct_em: 0.5
   line_end_compression: half_width
-author_bio_layout:                      # [S17] 全员作者简介（内容字段清单在 writing-spec.yaml）
-  pt: 9
-  first_line_indent_chars: 2
-  one_paragraph_per_author: true
+author_bio_layout:                      # [S17] 全员作者简介（内容字段清单在 writing-spec.yaml）；S17 原文无"一人一段"要求（polish.md 第 98 行），原 [S17] 标注系误标
+  pt: 9                                 # [SC] 字号类按用户裁定保持现值（final-recommendations.md A-4 的 pt 部分取消）
+  first_line_indent_chars: 0            # [JT] 范文作者信息全部顶格（x0=57.6，无首行缩进，2026-11-12，A-4）
+  one_paragraph_per_author: false       # [JT] 范文：首作者/通信作者各一段、其余作者合并一段（2026-11-12，D-5/L-4）

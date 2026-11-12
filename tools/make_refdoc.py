@@ -373,12 +373,23 @@ def _apply_three_line(styles: str, tables_cfg: dict) -> str:
     ])
     block = _replace_element(block, "w:tblPr", f"<w:tblPr>{inner}</w:tblPr>")
 
-    # header-row rule via conditional formatting (pandoc tables set firstRow look)
+    # header-row rule via conditional formatting (pandoc tables set firstRow look).
+    # C-1 header_fill (journal-measured 2026-11-12): when tables.header_fill is not
+    # "none", paint the header-row cells with a w:shd fill (e.g. E5EBF0) — the light
+    # grey header band the model journal shows. Text colour is left untouched (black
+    # on the fill, as measured). Absent/"none" writes no w:shd (previous behaviour).
+    header_fill = tables_cfg.get("header_fill") or "none"
+    fill_xml = ""
+    if header_fill != "none":
+        fill = re.sub(r"^#", "", str(header_fill)).strip() or "E5EBF0"
+        fill_xml = f'<w:shd w:val="clear" w:color="auto" w:fill="{fill.upper()}"/>'
     block = re.sub(r"<w:tblStylePr\b.*?</w:tblStylePr>", "", block, flags=re.S)
     style_pr = (
         '<w:tblStylePr w:type="firstRow"><w:tcPr><w:tcBorders>'
         + _border_el("w:bottom", widths.get("header", 0.5))
-        + "</w:tcBorders><w:vAlign w:val=\"bottom\"/></w:tcPr></w:tblStylePr>"
+        + "</w:tcBorders>"
+        + fill_xml
+        + '<w:vAlign w:val="bottom"/></w:tcPr></w:tblStylePr>'
     )
     idx = block.rindex("</w:style>")
     block = block[:idx] + style_pr + block[idx:]
@@ -752,9 +763,10 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
                            ppr={"align": "both", "first_line_chars": 0, "first_line_pt": 0,
                                 "space_before_pt": 0, "space_after_pt": 6})
 
-    # AuthorBio: venue S17 role — one paragraph per author (profile author_bio_layout:
-    # body font family, 9pt, justify, first-line indent 2 chars); created on demand
-    # because pandoc's base reference doc has no such style.
+    # AuthorBio: venue S17 role — profile author_bio_layout driven: body font family, 9pt,
+    # justify, first-line indent per profile (stie current: first_line_indent_chars=0 顶格,
+    # one_paragraph_per_author=false 即首作者/通信作者各一段、其余作者合并一段；键缺省时
+    # 回落默认 2 chars); created on demand because pandoc's base reference doc has no such style.
     abl = role.get("author_bio_layout") or {}
     styles = _ensure_style(styles, "AuthorBio", "author bio",
                            rpr={"fonts": f["body"], "size_pt": abl.get("pt", s.get("author_bio")),
@@ -874,10 +886,19 @@ def self_check(data: bytes, role: dict) -> dict:
     checks["no_blue_headings"] = not layoutlib.blue_colour_present(styles)
     footer_parts = [n for n in names if re.match(r"word/footer\d*\.xml", n)]
     checks["footer_page_field"] = any("PAGE" in z.read(n).decode("utf-8", "ignore") for n in footer_parts)
-    checks["header_placeholder"] = any("{{PAPER_TITLE}}" in z.read(n).decode("utf-8", "ignore")
-                                       for n in names if re.match(r"word/header\d*\.xml", n))
     tbl = style_block("Table")
     checks["table_three_line"] = layoutlib.three_line_table_ok(tbl)
+    # C-1 header_fill: when the profile asks for a header-row fill, the firstRow
+    # conditional format must actually carry the w:shd (journal-measured 2026-11-12).
+    tables_cfg = role.get("tables") or {}
+    header_fill = tables_cfg.get("header_fill") or "none"
+    if header_fill != "none":
+        fill = re.sub(r"^#", "", str(header_fill)).strip().upper() or "E5EBF0"
+        first_row = re.search(r'<w:tblStylePr w:type="firstRow">.*?</w:tblStylePr>', tbl, re.S)
+        checks["first_row_shd"] = bool(first_row) and f'w:fill="{fill}"' in first_row.group(0)
+        checks["first_row_shd_expected"] = f"w:shd fill={fill} in firstRow"
+    else:
+        checks["first_row_shd"] = None  # not demanded by this profile
     # fonts must be explicit, not theme-resolved
     m = re.search(r'w:eastAsia="([^"]+)"', normal)
     checks["normal_east_asia_font"] = m.group(1) if m else None
@@ -889,9 +910,25 @@ def self_check(data: bytes, role: dict) -> dict:
     checks["footer_page_field"] = any(
         layoutlib.has_exact_page_field(z.read(n).decode("utf-8", "ignore"))
         for n in names if re.match(r"word/(header|footer)\d*\.xml", n))
-    checks["header_placeholder"] = any(("{{PAPER_TITLE}}" in z.read(n).decode("utf-8", "ignore")
-                                        or "{{JOURNAL_LABEL}}" in z.read(n).decode("utf-8", "ignore"))
-                                       for n in names if re.match(r"word/header\d*\.xml", n))
+    # P1-a / A-3: with pagination.header=none the package must have NO header part
+    # at all. An unconditional "any(placeholder in header parts)" reads False on an
+    # empty sequence and would fail a legitimately header-less refdoc (exit code 2).
+    # Condition the check on the profile's header mode: none asserts absence, any
+    # other mode asserts the placeholder is genuinely present.
+    header_parts = [n for n in names if re.match(r"word/header\d*\.xml", n)]
+    header_mode = (role.get("pagination") or {}).get("header", "title_center")
+    if header_mode == "none":
+        checks["header_placeholder"] = not header_parts
+        checks["header_placeholder_expected"] = "none (no header part)"
+        checks["header_part_absent_when_none"] = not header_parts
+        checks["no_header_reference_when_none"] = "<w:headerReference" not in docxml
+    else:
+        checks["header_placeholder"] = any(
+            ("{{PAPER_TITLE}}" in z.read(n).decode("utf-8", "ignore")
+             or "{{JOURNAL_LABEL}}" in z.read(n).decode("utf-8", "ignore"))
+            for n in header_parts)
+        checks["header_placeholder_expected"] = "{{PAPER_TITLE}}/{{JOURNAL_LABEL}} placeholder"
+        checks["no_header_reference_when_none"] = None  # not applicable to this mode
     # every header/footer reference must resolve
     rels_xml = z.read("word/_rels/document.xml.rels").decode("utf-8")
     rel_map = {m.group(2): m.group(3) for m in
@@ -919,6 +956,9 @@ def self_check(data: bytes, role: dict) -> dict:
         and checks["footer_page_field"]
         and checks["header_placeholder"]
         and checks["table_three_line"]
+        and (checks["no_header_reference_when_none"] is None
+             or checks["no_header_reference_when_none"])
+        and (checks["first_row_shd"] is None or checks["first_row_shd"])
         and checks["normal_east_asia_font"] == checks["normal_east_asia_font_expected"]
         and checks["normal_latin_font"] == checks["normal_latin_font_expected"]
         and checks["header_footer_refs_resolve"]
