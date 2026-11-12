@@ -210,6 +210,39 @@
 
 - abstract.md 的 `## 中文摘要` 机器锚点结构**保持不变**。manifest 抽取器（`tools/paper.py` submission 抽取）依赖该锚点从 abstract.md 提取中英文摘要与关键词；投稿面渲染已由 paper.md 侧修正为接排。两层格式分工明确：**abstract.md 供机器抽取（结构锚点稳定），paper.md 供投稿渲染（接排呈现）**，互不取代。
 
+### 12.4 同日修正：摘要块 Abstract 开_div_ 误删修复（2026-11-13）
+
+- **缺陷**：12.1 的"四标签合并"（`merge_label_pair` 删除 AbstractTitle 包裹时把
+  `::: {custom-style="Abstract"}` 开_div_ 一并删掉）导致标签段落变成裸文本——前一行是普通
+  `:::` 而非 Abstract 开_div_，docx 渲染为 **BodyText 而非 Abstract 样式**，profile 的摘要
+  角色被静默绕过（body/paper.md 中「摘要：」「关键词：」「Keywords: 」为裸文本、段后闭_div_
+  孤立；docx 实测这些段 pStyle=BodyText）。
+- **P1 无此问题**：P1 四标签全部正确包裹，本修正轮未触碰 P1 任何文件。
+- **范围与处数**：P2–P7 共 6 篇 **20 处**裸标签行补回开_div_（结构实测：
+  P2/P4/P5/P6 缺「摘要：」「关键词：」「Keywords: 」三处、英文 Abstract: 行已正确包裹；
+  P3/P7 四标签全部缺失）。注意：本条按逐篇实际缺失计数为 20 处，与派单口径"21 处"差 1
+  （派单口径对 P2/P4/P5/P6 亦按四标签计），最终以结构自检实测为准。
+- **修复方式**：每处仅在裸标签行前插入一行 `::: {custom-style="Abstract"}`，**零其他改动**
+  （标签文字、摘要/关键词正文、前端块之外结构一律未动；逐仓 git diff 均为纯新增行、无删除）。
+  **逐处先看上下文再插**：P3 的 Abstract: 行前一行是英文单位行、位于 `lang=en` 块内；
+  P7 的 Abstract: 行前一行是 `:::`（BodyText 基金块闭_div_）。插入后全文 fenced-div 栈式配对
+  平衡（无未闭合、无多余闭_div_），lang=en 嵌套完好。
+- **版本**：patch 递增（纯版式/形式修正，科学内容零变）：P2 v0.4.7→**v0.4.8**、
+  P3 v0.3.7→**v0.3.8**、P4 v0.3.4→**v0.3.5**、P5 v0.4.6→**v0.4.7**、P6 v0.2.5→**v0.2.6**、
+  P7 v0.2.6→**v0.2.7**。
+- **验证结论**（6 篇全部实测通过）：
+  1. 结构自检：四标签行**前一个非空行均为 `::: {custom-style="Abstract"}`**（各 1 段，共 4 处
+     全部包裹）；全文 Abstract 开_div_ 数 = 闭_div_ 数（按自定义样式块计）= 4 = 四标签段落数；
+     零 AbstractTitle 残留。
+  2. docx 解包：四标签均以段落前缀形式存在于同一 `w:p`，**pStyle=Abstract**（非 BodyText）。
+  3. `tools/verify_layout.py` 全量回归：**TOTAL 26 PASS 26 FAIL 0**（保持）；manifest
+     `role_style_coverage.used_paragraph_styles` **重新包含 `Abstract`**、
+     `profile_role_styles_not_used` 不再含 `Abstract`（摘要角色落地，此前被静默绕过）。
+  4. manifest `submission` 块各字段与上一版完全一致（same），**非空状态不变**。
+- **留痕**：修复/自检/样式验证脚本 `/home/author_a/workspaces/PaperWorkflows/temp/pw-fix-20261113/`
+  （restore_abstract_dirs.py / self_check.py / verify_docx_styles.py）；6 篇 build-record.md 各追加
+  同日修正节（P2 R12 / P3 R10 / P4 R8 / P5 R9 / P6 R13 / P7 R9）并各一提交；本记录即 §12 同日修正备案。
+
 ---
 
 *GC-2026-1112-05。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B3/PF-B10/PF-B11/PF-B12/PF-B13/PF-B14；写作依据 governance/writing.md PF-W11/PF-W12；版本依据 governance/versions.md PF-V1/PF-V3；规则版本 0.3.0；前置分析 temp/template-analysis-20261112/。*
