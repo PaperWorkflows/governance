@@ -56,6 +56,9 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 - Published versions cannot be modified in place. Old versions preserved.
 - Manifest records: paper identity, paper_version, manuscript_kind, title and authorship config, input snapshot, rules_version, toolchain version, environment, both artifact checksums, review and re-verification relationships, open limitations, timestamp.
 - After all checks complete, atomically switch `build/current.json` within publish lock. Read first parses manifest, then reads referenced full version.
+- **产物本体不入版本库**：`build/`、`temp/`、`output/` 由论文仓 `.gitignore` 排除，docx/PDF/manifest 留在本地工作区，**不得 `git add -f`** 强行入库。
+- **入库的凭据有两份，缺一不可**：机器可读的 `build/<version>/manifest.json`（输入快照、profile 与 reference docx 的 sha256、规则版本、产物 sha256、页数）与**人可读的 `build-record.md`**（每次构建的可复现步骤、产物校验、版式决策与取舍登记、已发现但未修的问题）。前者说明"是什么"，后者说明"为什么"。
+- 论文仓根目录必须存在 `build-record.md`（脚手架随模板创建）；每次构建**追加**一节，不改写既有节，与"已发布版本不得就地修改"一致。
 
 ### PF-B8 本地交付
 

@@ -42,9 +42,15 @@
 │   ├── logs/                  ← Run logs
 │   └── record.yaml            ← Experiment records
 ├── appendix/                  ← Supplementary materials
-└── build/
+├── build-record.md            ← **入库的发布账本**：每次构建的可复现步骤、产物校验与版式决策
+└── build/                     ← 产物本体（**不入库**，见 .gitignore）
     └── layout.yaml            ← Paper-level layout overrides
 ```
+
+> **产物不入库**：docx / PDF / manifest 留在 `build/<version>/` 的本地工作区。
+> 入库的凭据是 `build-record.md`（人可读：为什么这么排、改了什么、没改什么）
+> 与 `build/<version>/manifest.json`（机器可读：输入快照、profile 与 refdoc 的
+> sha256、规则版本、产物 sha256）。见 PF-B5 / PF-B6 / PF-B7。
 
 ## Stage Lifecycle
 

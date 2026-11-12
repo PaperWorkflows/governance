@@ -2,8 +2,13 @@
 # Temporary materials — must not be committed
 temp/
 output/
-build/
 _build/
+# 构建产物（docx/PDF/manifest/current.json）不入库；入库凭据是
+# build-record.md 与 build/<version>/manifest.json（PF-B5/PF-B6/PF-B7）。
+# 但 build/ 下的**配置**必须入库：layout.yaml 是 L2 版式覆盖层（PF-B13）。
+build/*
+!build/layout.yaml
+!build/README.md
 
 # Python
 __pycache__/
