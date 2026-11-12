@@ -2898,7 +2898,11 @@ def _cmd_build_docx_impl(args) -> tuple:
             "toolchain": {"pandoc": pandoc_version},
             "layout": {
                 "profile": layout["profile_name"],
-                "rules_version": "0.3.0",
+                # PF-B7: the manifest must record the rules version the PAPER is
+                # bound to, not a constant baked into the tool (a hardcoded value
+                # made the manifest claim a binding the papers did not have —
+                # found 2026-11-12: manifest 0.3.0 vs paper.yaml 0.2.1).
+                "rules_version": paper_cfg.get("rules_version") or "unbound",
                 "merge_order": "L0(draft) -> L1(venue) -> L2(paper)",
                 "override_log": layout["override_log"],
                 "reference_doc": str(layout["refdoc_path"].relative_to(layoutlib.GOV_ROOT)),
