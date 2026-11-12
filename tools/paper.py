@@ -2231,6 +2231,57 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
         block = _style_block(styles, "Table")
         check("table_three_line_borders", True, layoutlib.three_line_table_ok(block))
 
+    # ── GC-2026-1112-01: heiti weight / abstract-label alignment / citation
+    # superscript. When the profile states a dimension, the artifact must carry
+    # it; when it does not, the dimension is skipped (never a silent pass).
+    heading_bold = role.get("heading_bold")
+    caption_bold = role.get("caption_bold")
+    label_align = role.get("abstract_label_alignment")
+
+    def bold_val_of(style_id: str) -> str | None:
+        # pandoc re-serialises the produced styles.xml ("<w:b w:val="0" />" with
+        # space before the slash), so the pattern must tolerate whitespace.
+        m = re.search(r'<w:b w:val="(\d)"\s*/>', _style_block(styles, style_id))
+        return m.group(1) if m else None
+
+    if heading_bold is False:
+        for sid in ("Heading1", "Heading2", "Heading3", "Heading4", "Heading5", "AbstractTitle"):
+            check(f"{sid.lower()}_bold_off", "0", bold_val_of(sid))
+    if caption_bold is False:
+        for sid in ("Caption", "ImageCaption", "TableCaption"):
+            check(f"{sid.lower()}_bold_off", "0", bold_val_of(sid))
+    if label_align:
+        m = re.search(r'<w:jc w:val="([a-z]+)"\s*/>', _style_block(styles, "AbstractTitle"))
+        check("abstract_title_alignment", label_align, m.group(1) if m else None)
+
+    citation_cfg = merged.get("citation", {}) or {}
+    if citation_cfg.get("numeric_superscript"):
+        marked_total, plain = 0, 0
+        for pm in re.finditer(r"<w:p\b.*?</w:p>", docxml, re.S):
+            para = pm.group(0)
+            st = re.search(r'<w:pStyle w:val="([^"]+)"', para)
+            if st and st.group(1) in _CITE_EXCLUDED_STYLES:
+                continue
+            for rm in re.finditer(r"<w:r\b[^>]*>.*?</w:r>", para, re.S):
+                tm = re.search(r"<w:t[^>]*>([^<]*)</w:t>", rm.group(0))
+                if not tm:
+                    continue
+                hits = _CITATION_PATTERN.findall(tm.group(1))
+                if not hits:
+                    continue
+                marked_total += len(hits)
+                if not re.search(r'<w:vertAlign w:val="superscript"\s*/>', rm.group(0)):
+                    plain += 1
+        if marked_total == 0:
+            notes.append({"check": "citation_superscript_coverage", "value": 0,
+                          "status": "no_numeric_citations_in_body"})
+        elif plain:
+            failures.append({"check": "citation_superscript_coverage",
+                             "expected": f"all {marked_total} citation run(s) superscripted",
+                             "actual": f"{plain} run(s) left plain"})
+        else:
+            notes.append({"check": "citation_superscript_coverage", "value": marked_total})
+
 
     # formula objects: OMML present iff source math markers exist (checked by caller)
     notes.append({"check": "omath_count", "value": docxml.count("<m:oMath")})
@@ -2314,6 +2365,119 @@ def _harden_tables(docx_path: Path) -> int:
     return patched
 
 
+# ── GC-2026-1112-01: in-text numeric citations as superscript ────────────────
+# GB/T 7714 numeric-citation convention (common practice; user directive
+# 2026-11-12, profile citation.numeric_superscript). The pattern is deliberately
+# narrow, shaped by false positives actually observed in the P1–P7 bodies:
+#   - 1–3 digit numbers only: access dates like [2026-11-11] (GB/T 7714 引用日期)
+#     never match;
+#   - no space after the comma: interval notation like [12, 40] (P4 §5) never
+#     matches;
+#   - OMML math (<m:t>) is not <w:t> and is skipped outright ($\sigma \in [0, 1]$).
+# Reference-list entries (Bibliography style) and code blocks (SourceCode style)
+# are excluded by paragraph style.
+_CITATION_PATTERN = re.compile(r"\[\d{1,3}(?:-\d{1,3})*(?:,\d{1,3}(?:-\d{1,3})*)*\]")
+_CITE_EXCLUDED_STYLES = ("Bibliography", "SourceCode")
+# Runs carrying these are never plain-text citation carriers.
+_RUN_NON_TEXT_MARKERS = ("<w:drawing", "<w:pict", "<w:fldChar", "<w:instrText",
+                         "<w:footnoteRef", "<w:endnoteRef", "<w:sep", "<w:object")
+
+
+def _superscript_run_parts(run: str, t_open: str, text: str) -> tuple[list[str], int]:
+    """Split one run's text at citation boundaries; citation segments keep the
+    original rPr plus <w:vertAlign w:val="superscript"/> (inserted at its
+    ECMA-376 position — after w:fitText, before w:rtl/w:cs/w:em/w:lang)."""
+    m = re.search(r"<w:rPr>(.*?)</w:rPr>", run, re.S)
+    rpr_inner = m.group(1) if m else ""
+    if "<w:vertAlign" in rpr_inner:
+        return [run], 0  # already raised (e.g. ^sup^ in source); never double-apply
+    # t_open is "<w:t" + attributes + ">"; keep the attribute slice verbatim
+    t_attrs = t_open[len("<w:t"):-1]
+    el = '<w:vertAlign w:val="superscript"/>'
+    insert_at = len(rpr_inner)
+    for anchor in ("<w:rtl", "<w:cs", "<w:em", "<w:lang"):
+        i = rpr_inner.find(anchor)
+        if i != -1:
+            insert_at = min(insert_at, i)
+    segs, last, marked = [], 0, 0
+    for cm in _CITATION_PATTERN.finditer(text):
+        if cm.start() > last:
+            segs.append((text[last:cm.start()], False))
+        segs.append((cm.group(0), True))
+        last = cm.end()
+        marked += 1
+    if last < len(text):
+        segs.append((text[last:], False))
+    out = []
+    run_open = run[:run.index(">") + 1]
+    for seg_text, is_cite in segs:
+        if is_cite:
+            rpr = f"<w:rPr>{rpr_inner[:insert_at]}{el}{rpr_inner[insert_at:]}</w:rPr>"
+        else:
+            rpr = f"<w:rPr>{rpr_inner}</w:rPr>" if m else ""
+        out.append(f"{run_open}{rpr}<w:t{t_attrs}>{seg_text}</w:t></w:r>")
+    return out, marked
+
+
+def _apply_citation_superscript(docx_path: Path) -> int:
+    """Mark every in-text numeric citation as superscript on the produced docx.
+
+    A citation split across two runs is NOT re-joined — the coverage assertion
+    fails the build visibly instead of silently mis-rendering (PF-B12).
+    Returns the number of citations marked."""
+    src = zipfile.ZipFile(docx_path)
+    parts = {n: src.read(n) for n in src.namelist()}
+    doc = parts["word/document.xml"].decode("utf-8")
+    total = 0
+
+    def superscript_runs_in(segment: str) -> tuple[str, int]:
+        out, last, marked = [], 0, 0
+        for rm in re.finditer(r"<w:r\b[^>]*>.*?</w:r>", segment, re.S):
+            run = rm.group(0)
+            out.append(segment[last:rm.start()])
+            last = rm.end()
+            tm = re.search(r"(<w:t[^>]*>)([^<]*)</w:t>", run)
+            if not tm or any(marker in run for marker in _RUN_NON_TEXT_MARKERS) \
+                    or not _CITATION_PATTERN.search(tm.group(2)):
+                out.append(run)
+                continue
+            rebuilt, n = _superscript_run_parts(run, tm.group(1), tm.group(2))
+            out.extend(rebuilt)
+            marked += n
+        out.append(segment[last:])
+        return "".join(out), marked
+
+    def process_paragraph(para: str) -> tuple[str, int]:
+        st = re.search(r'<w:pStyle w:val="([^"]+)"', para)
+        if st and st.group(1) in _CITE_EXCLUDED_STYLES:
+            return para, 0
+        pieces, last, marked = [], 0, 0
+        # OMML math spans are passed through untouched
+        for mm in re.finditer(r"<m:oMathPara\b.*?</m:oMathPara>|<m:oMath\b.*?</m:oMath>", para, re.S):
+            piece, n = superscript_runs_in(para[last:mm.start()])
+            pieces += [piece, para[mm.start():mm.end()]]
+            marked += n
+            last = mm.end()
+        piece, n = superscript_runs_in(para[last:])
+        pieces.append(piece)
+        marked += n
+        return "".join(pieces), marked
+
+    new_doc, last = [], 0
+    for pm in re.finditer(r"<w:p\b.*?</w:p>", doc, re.S):
+        new_doc.append(doc[last:pm.start()])
+        piece, n = process_paragraph(pm.group(0))
+        new_doc.append(piece)
+        total += n
+        last = pm.end()
+    new_doc.append(doc[last:])
+    doc = "".join(new_doc)
+    if doc != parts["word/document.xml"].decode("utf-8"):
+        parts["word/document.xml"] = doc.encode("utf-8")
+        docx_path.write_bytes(_zip_parts(parts))
+    return total
+
+
 def _assert_refdoc_in_sync(profile_name: str, refdoc_path: Path) -> dict:
     """Regenerate the reference docx from its profile and compare it with the
     checked-in file (PF-B11: the refdoc is generated, never hand-edited)."""
@@ -2358,6 +2522,70 @@ def _apply_math_font_to_output(docx_path: Path, math_font: str | None) -> bool:
     parts["word/settings.xml"] = new_text.encode("utf-8")
     docx_path.write_bytes(_zip_parts(parts))
     return True
+
+
+SVG_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+
+
+def _strip_svg_alternatives(docx_path: Path) -> dict:
+    """Drop the SVG alternative from picture blips, keeping the PNG fallback.
+
+    pandoc embeds an SVG source as BOTH an <a:blip> PNG fallback and an
+    <asvg:svgBlip> SVG alternative. Word 2016+ renders the SVG; LibreOffice
+    (the PDF conversion step) picks the SVG and renders NOTHING, so the PDF
+    shipped with empty figure slots (P1/P3, 2026-11-12). Removing the SVG
+    alternative leaves the PNG as the single image, which every reader renders.
+
+    The SVG sources stay in the paper's figures/ directory for the venue's
+    separate SVG attachment (S19), so nothing is lost.
+    """
+    import io
+    src = zipfile.ZipFile(docx_path)
+    parts = {n: src.read(n) for n in src.namelist()}
+    doc = parts["word/document.xml"].decode("utf-8")
+    if "svgBlip" not in doc:
+        return {"stripped": 0, "removed_parts": []}
+    rels_name = "word/_rels/document.xml.rels"
+    rels = parts[rels_name].decode("utf-8")
+
+    dropped_rids = set()
+
+    def fix_blip(m):
+        """Within one <a:blip>: drop the SVG alternative only if a raster fallback exists."""
+        blk = m.group(0)
+        open_tag = blk[:blk.index(">") + 1]
+        primary = re.search(r'r:embed="([^"]+)"', open_tag)
+        svgs = re.findall(r'<asvg:svgBlip[^>]*r:embed="([^"]+)"', blk)
+        if not svgs or not primary or primary.group(1) in svgs:
+            return blk          # the SVG IS the only image — keep it
+        for rid in svgs:
+            dropped_rids.add(rid)
+        # remove the <a:ext> wrapper that holds only the svgBlip
+        def kill_ext(em):
+            return "" if "svgBlip" in em.group(0) else em.group(0)
+        blk = re.sub(r"<a:ext [^>]*>.*?</a:ext>", kill_ext, blk, flags=re.S)
+        return blk
+
+    doc = re.sub(r"<a:blip\b[^>]*>.*?</a:blip>", fix_blip, doc, flags=re.S)
+
+    removed_parts = []
+    for rid in sorted(dropped_rids):
+        m = re.search(r'<Relationship [^>]*Id="' + re.escape(rid) + r'"[^>]*Target="([^"]+)"[^>]*/>', rels)
+        if not m:
+            continue
+        target = m.group(1)
+        if not target.lower().endswith(".svg"):
+            continue
+        rels = rels.replace(m.group(0), "")
+        part = "word/" + target.lstrip("/")
+        if part in parts:
+            del parts[part]
+            removed_parts.append(part)
+
+    parts["word/document.xml"] = doc.encode("utf-8")
+    parts[rels_name] = rels.encode("utf-8")
+    docx_path.write_bytes(_zip_parts(parts))
+    return {"stripped": len(dropped_rids), "removed_parts": removed_parts}
 
 
 def _repair_header_footer_relationships(docx_path: Path) -> dict:
@@ -2511,7 +2739,12 @@ def _cmd_build_docx_impl(args) -> tuple:
             "--from", "markdown", "--to", "docx",
             "--output", str(output_file),
             "--reference-doc", str(layout["refdoc_path"]),
+            # Resource path: the paper root resolves 'figures/x.svg' (as used by
+            # P1/P4/P6/P7); the body dir additionally resolves '../figures/x.svg'
+            # (as used by P2/P3). Without the second entry those papers silently
+            # shipped with NO figures (pandoc only warns) — found 2026-11-12.
             "--resource-path", str(dest),
+            "--resource-path", str(dest / "body"),
             "--metadata", f"title={title}",
         ]
         if title_en:
@@ -2523,21 +2756,49 @@ def _cmd_build_docx_impl(args) -> tuple:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0 or not output_file.exists():
             return ({"status": "error", "error": result.stderr.strip() or "pandoc failed", "stderr": result.stderr[:500]}, 1)
+        # A figure that could not be resolved is only a pandoc WARNING — the build
+        # used to succeed with an empty figure slot (found on P2/P3, 2026-11-12).
+        # PF-B6 requires the actual rendering to be checked, so the produced package
+        # must contain every figure the body references.
+        src_text = body_source.read_text(encoding="utf-8")
+        refs = [m.group(1).strip() for m in
+                re.finditer(r"!\[[^\]]*\]\(([^)\s]+)", src_text)]
+        with zipfile.ZipFile(output_file) as _z:
+            embedded = [n for n in _z.namelist() if n.startswith("word/media/")]
+        missing_figures = max(0, len(refs) - len(embedded))
+        if missing_figures:
+            return ({"status": "error",
+                     "error": (f"{missing_figures} of {len(refs)} referenced figures are absent "
+                               f"from the produced document — shipping it would deliver the "
+                               f"paper with missing figures (PF-B6)"),
+                     "figure_refs": len(refs), "figures_embedded": len(embedded),
+                     "stage": "build", "stderr": result.stderr[:500]}, 1)
 
         _inject_paper_title_header(output_file, title)
         # pandoc copies the header/footer parts but not their relationships;
         # close the graph so the delivered docx is a valid package.
         hf_repair = _repair_header_footer_relationships(output_file)
+        # LibreOffice renders the SVG alternative as nothing; keep the PNG fallback.
+        svg_stripped = _strip_svg_alternatives(output_file)
         # pandoc drops m:mathPr from the reference settings.xml; re-apply it so the
         # profile's math font actually reaches the document.
         math_font = (layout["role"].get("fonts", {}).get("math") or (None, None))[1]
         math_applied = _apply_math_font_to_output(output_file, math_font)
         table_rows_hardened = _harden_tables(output_file)
+        # GC-2026-1112-01: in-text numeric citations become superscript when the
+        # profile declares citation.numeric_superscript (reference list, code and
+        # math excluded — see _apply_citation_superscript).
+        citations_marked = None
+        if (layout["merged"].get("citation", {}) or {}).get("numeric_superscript"):
+            citations_marked = _apply_citation_superscript(output_file)
 
         # ── profile-landing assertions (hard fail; no silent degradation) ──
         failures, layout_notes = _assert_layout_landing(output_file, layout["role"], layout["merged"])
         layout_notes.append({"check": "table_rows_cantsplit_tblheader", "value": table_rows_hardened})
         layout_notes.append({"check": "header_footer_relationship_repair", "value": hf_repair})
+        if citations_marked is not None:
+            layout_notes.append({"check": "citation_superscript_marked", "value": citations_marked})
+        layout_notes.append({"check": "svg_alternatives_stripped", "value": svg_stripped})
 
         # ── content-compliance assertion: equations must be OMML, not images (S9) ──
         source_text = body_source.read_text(encoding="utf-8")
@@ -2599,7 +2860,7 @@ def _cmd_build_docx_impl(args) -> tuple:
             "toolchain": {"pandoc": pandoc_version},
             "layout": {
                 "profile": layout["profile_name"],
-                "rules_version": "0.2.0",
+                "rules_version": "0.2.1",
                 "merge_order": "L0(draft) -> L1(venue) -> L2(paper)",
                 "override_log": layout["override_log"],
                 "reference_doc": str(layout["refdoc_path"].relative_to(layoutlib.GOV_ROOT)),

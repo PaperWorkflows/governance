@@ -77,6 +77,9 @@ typography:
     alignment: justify
     spacing_before_pt: 0
     spacing_after_pt: 0
+  heading_bold: false                   # [TD]+用户指示 GC-2026-1112-01：黑体标题不设加粗（同 L0 全局基线）
+  caption_bold: false                   # [TD]+用户指示 GC-2026-1112-01：图表题黑体不加粗（同 L0）
+  abstract_label_alignment: left        # [TD]+用户指示 GC-2026-1112-01：摘要/Abstract/关键词/Keywords 标签左对齐（同 L0）
   heading_numbering:                    # [S8] 层次序号 1、1.1、1.1.1、（1）、①；顶格
     max_level: 5
     recommended_max_level: 3            # [S8] 层次不宜过多

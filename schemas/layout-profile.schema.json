@@ -134,6 +134,19 @@
             "spacing_after_pt":  { "type": "number", "minimum": 0 }
           }
         },
+        "heading_bold": {
+          "type": "boolean",
+          "description": "Whether heading roles (Heading1-5, AbstractTitle label) are set bold. GC-2026-1112-01: heiti (黑体) headings are NOT bolded — the face itself carries the emphasis; explicit w:b val=0 cancels inherited bold. Absent = generator default (bold on, pre-GC-2026-1112-01 behaviour)"
+        },
+        "caption_bold": {
+          "type": "boolean",
+          "description": "Whether caption roles (Caption/ImageCaption/TableCaption) are set bold. GC-2026-1112-01: heiti captions are not bolded. Absent = generator default (bold on)"
+        },
+        "abstract_label_alignment": {
+          "type": "string",
+          "enum": ["left", "center", "right"],
+          "description": "Alignment of the abstract/keywords label paragraphs (AbstractTitle style: 摘要/Abstract/关键词/Keywords). GC-2026-1112-01: left-aligned, not centered. Absent = generator default (center)"
+        },
         "heading_numbering": {
           "type": "object",
           "additionalProperties": false,
@@ -268,6 +281,10 @@
         "standard_edition":       { "type": "string", "description": "e.g., GB/T 7714-2015 (as cited by venue) or GB/T 7714-2025 (current)" },
         "standard_edition_note":  { "type": "string" },
         "preferred_recency_years":{ "type": "integer", "minimum": 0, "description": "Prefer references published within N years (venue S13: 5)" },
+        "numeric_superscript": {
+          "type": "boolean",
+          "description": "In-text numeric citations [N] / [1,3] / [2-5] render as superscript (GC-2026-1112-01; common practice for GB/T 7714 numeric citations, user directive 2026-11-12). Reference-list entries (Bibliography), code, and OMML math are excluded; 4-digit numbers (e.g. access dates [2026-11-11]) and comma-space interval forms ([12, 40]) never match. Absent = no superscripting"
+        },
         "in_text_forms": {
           "type": "object",
           "additionalProperties": false,

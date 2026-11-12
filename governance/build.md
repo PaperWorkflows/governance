@@ -89,6 +89,7 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 - The refdoc generator writes OOXML directly with the **standard library only** — `python-docx`/`lxml` live in user site-packages and are unavailable under `python3 -I`, so they must not be relied upon. The toolchain's declared third-party dependencies are `yaml` and `jsonschema` (both in `/usr/lib/python3/dist-packages`).
 - **The build verifies that the checked-in reference docx still matches its profile**: it regenerates the refdoc and compares byte for byte. A stale or hand-edited refdoc **fails the build** — otherwise the "generated from the profile" promise would be unenforced.
 - Reference docx generation must be **deterministic** (fixed zip timestamps and core.xml dates) so that regeneration is byte-comparable and a profile change is visible as a diff.
+- Role weight and abstract-label alignment are **profile keys** (GC-2026-1112-01): `typography.heading_bold`, `typography.caption_bold`, `typography.abstract_label_alignment`. Rationale: 黑体（heiti）faces carry their own weight, so headings and captions in a heiti face are **not bolded** (no faux-bold), and the 摘要/Abstract/关键词/Keywords labels are **left-aligned**. An absent key keeps the generator's pre-GC-2026-1112-01 default (bold on, label centered) so older profiles still validate.
 
 ### PF-B12 版式落地校验
 
@@ -98,6 +99,7 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 - Font substitution by the PDF conversion step is recorded, never silent: the build compares the font families the profile requires against the families actually embedded in the PDF, and any family that is absent is written to the manifest as a limitation with the missing list. A PDF whose font inventory cannot be produced (`pdffonts` unavailable) **fails the build** — an unverifiable PDF must not be published.
 - The **math font** is controlled at the document level: the produced docx must declare `m:mathFont` for the profile's math family (pandoc drops `m:mathPr` from the reference settings.xml, so the build re-applies it). The PDF's math glyphs come from the host's LibreOffice math configuration and are therefore a **host substitution**, recorded as such rather than as a profile failure.
 - Where the profile states a dimension the document does not (e.g. a role the body never uses), the assertion records it as **skipped**, so the manifest shows which dimensions were not verified.
+- In-text numeric citations `[N]` / `[1,3]` / `[2-5]` are rendered **superscript** when the profile declares `citation.numeric_superscript` (GC-2026-1112-01; reference-list entries, code, OMML math, 4-digit forms such as access dates `[2026-11-11]`, and comma-space interval forms `[12, 40]` are excluded). The build asserts **coverage**: every citation run outside the excluded contexts must carry the superscript, so a missed citation fails the build instead of silently rendering as body text.
 
 ### PF-B13 L2 覆盖边界
 

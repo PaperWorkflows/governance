@@ -67,6 +67,9 @@ typography:
     alignment: justify
     spacing_before_pt: 0
     spacing_after_pt: 0
+  heading_bold: false                   # [TD]+用户指示 GC-2026-1112-01：黑体标题不设加粗（黑体本身即强调，避免伪加粗笔画发糊）；生成器显式写 w:b val=0
+  caption_bold: false                   # [TD]+用户指示 GC-2026-1112-01：图表题黑体同理不加粗
+  abstract_label_alignment: left        # [TD]+用户指示 GC-2026-1112-01：摘要/Abstract/关键词/Keywords 标签左对齐（不居中）
   heading_numbering:                    # GB/T 7713.2-2022 §5.2.2（顶格、空一字、末尾不加点）
     max_level: 5
     recommended_max_level: 3
@@ -105,6 +108,7 @@ formulas:
 citation:
   style: gb-7714-2025                   # 现行版（顺序编码制为默认草案）
   system: numeric
+  numeric_superscript: true             # [TD]+用户指示 GC-2026-1112-01：正文 [N]/[1,3]/[2-5] 上标；参考文献表（Bibliography 段）、代码、公式与 4 位数字形态（引用日期 [2026-11-11]）不适用
 references:
   order: [appearance]
   heading_pt: 12

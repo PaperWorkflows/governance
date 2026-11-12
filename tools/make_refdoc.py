@@ -656,6 +656,12 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
     f, s, p = role["fonts"], role["sizes"], role["paragraph"]
     indent_chars = role["first_line_indent_chars"] or 0
     body_pt = role["body_pt"] or 10.5
+    # GC-2026-1112-01: heiti (黑体) faces carry their own weight — setting bold on
+    # top of them produces faux-bold (double-struck) strokes. The profile decides;
+    # absence keeps the pre-GC-2026-1112-01 behaviour (bold on, label centered).
+    heading_bold = True if role.get("heading_bold") is None else role["heading_bold"]
+    caption_bold = True if role.get("caption_bold") is None else role["caption_bold"]
+    label_align = role.get("abstract_label_alignment") or "center"
 
     # 1. doc defaults
     styles = _apply_doc_defaults(styles, role)
@@ -693,8 +699,8 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
                                 "space_before_pt": 0, "space_after_pt": 0})
     styles = _patch_style(styles, "AbstractTitle",
                            rpr={"fonts": f["heading"], "size_pt": s.get("abstract_label"),
-                                "bold": True, "black": True},
-                           ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                "bold": heading_bold, "black": True},
+                           ppr={"align": label_align, "first_line_chars": 0, "first_line_pt": 0,
                                 "space_before_pt": 6, "space_after_pt": 0,
                                 "keep_with_next": True, "keep_lines": False})
     styles = _patch_style(styles, "Abstract",
@@ -712,7 +718,7 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
         before, after = heading_space.get(level, (3, 0))
         styles = _patch_style(styles, f"Heading{level}",
                                rpr={"fonts": f["heading"], "size_pt": s.get(f"heading{level}"),
-                                    "bold": True, "italic": False, "black": True},
+                                    "bold": heading_bold, "italic": False, "black": True},
                                ppr={"align": "left", "first_line_chars": 0, "first_line_pt": 0,
                                     "space_before_pt": before, "space_after_pt": after,
                                     "keep_with_next": True})
@@ -720,7 +726,7 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
         # default blue heading colour, which must not survive into a paper.
         styles = _patch_style(styles, f"Heading{level}Char",
                                rpr={"fonts": f["heading"], "size_pt": s.get(f"heading{level}"),
-                                    "bold": True, "italic": False, "black": True})
+                                    "bold": heading_bold, "italic": False, "black": True})
 
     # Safety net: no style may keep pandoc's blue theme heading colour.
     styles = _neutralise_theme_colours(styles)
@@ -728,7 +734,7 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
     for name in ("Caption", "ImageCaption", "TableCaption"):
         styles = _patch_style(styles, name,
                                rpr={"fonts": f["caption"], "size_pt": s.get("caption"),
-                                    "italic": False, "bold": True, "black": True},
+                                    "italic": False, "bold": caption_bold, "black": True},
                                ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
                                     "space_before_pt": 3, "space_after_pt": 6,
                                     "keep_with_next": name == "TableCaption"})
@@ -832,6 +838,28 @@ def self_check(data: bytes, role: dict) -> dict:
     checks["title_pt_expected"] = role["sizes"].get("title_zh")
     checks["heading1_pt"] = sz_of("Heading1")
     checks["heading1_pt_expected"] = role["sizes"].get("heading1")
+
+    # GC-2026-1112-01: heiti weight + abstract-label alignment must land in the
+    # refdoc exactly as the profile declares them.
+    def bold_of(sid: str) -> bool | None:
+        m = re.search(r'<w:b w:val="(\d)"/>', style_block(sid))
+        return bool(int(m.group(1))) if m else None
+
+    def align_of(sid: str) -> str | None:
+        m = re.search(r'<w:jc w:val="([a-z]+)"/>', style_block(sid))
+        return m.group(1) if m else None
+
+    expected_heading_bold = True if role.get("heading_bold") is None else role["heading_bold"]
+    expected_caption_bold = True if role.get("caption_bold") is None else role["caption_bold"]
+    expected_label_align = role.get("abstract_label_alignment") or "center"
+    checks["heading1_bold"] = bold_of("Heading1")
+    checks["heading1_bold_expected"] = expected_heading_bold
+    checks["abstract_title_bold"] = bold_of("AbstractTitle")
+    checks["abstract_title_bold_expected"] = expected_heading_bold
+    checks["abstract_title_alignment"] = align_of("AbstractTitle")
+    checks["abstract_title_alignment_expected"] = expected_label_align
+    checks["table_caption_bold"] = bold_of("TableCaption")
+    checks["table_caption_bold_expected"] = expected_caption_bold
     normal = style_block("Normal")
     m = re.search(r'w:firstLineChars="(\d+)"', normal)
     checks["normal_first_line_chars"] = int(m.group(1)) / 100 if m else None
@@ -880,6 +908,10 @@ def self_check(data: bytes, role: dict) -> dict:
     ok = (
         checks["title_pt"] == checks["title_pt_expected"]
         and checks["heading1_pt"] == checks["heading1_pt_expected"]
+        and checks["heading1_bold"] == checks["heading1_bold_expected"]
+        and checks["abstract_title_bold"] == checks["abstract_title_bold_expected"]
+        and checks["abstract_title_alignment"] == checks["abstract_title_alignment_expected"]
+        and checks["table_caption_bold"] == checks["table_caption_bold_expected"]
         and checks["normal_first_line_chars"] == checks["normal_first_line_chars_expected"]
         and checks["page_mm"] == checks["page_mm_expected"]
         and checks["margins_mm"] == margins_expected

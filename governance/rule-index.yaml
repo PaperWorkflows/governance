@@ -1,5 +1,5 @@
 schema_version: 1
-rules_version: 0.2.0
+rules_version: 0.2.1
 notice: Structure parseable does not prove rules executed; current tools only check index and file structure.
 
 rules:

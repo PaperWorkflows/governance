@@ -85,8 +85,10 @@ def section_b() -> None:
     baseline = copy.deepcopy(schema)
     for key in ("figures", "tables", "references", "pagination", "punctuation", "author_bio_layout"):
         baseline["properties"].pop(key, None)
-    for key in ("fonts", "sizes", "paragraph", "heading_numbering"):
+    for key in ("fonts", "sizes", "paragraph", "heading_numbering",
+                "heading_bold", "caption_bold", "abstract_label_alignment"):  # GC-2026-1112-01
         baseline["properties"]["typography"].pop(key, None)
+    baseline["properties"]["citation"]["properties"].pop("numeric_superscript", None)  # GC-2026-1112-01
     validator = jsonschema.Draft7Validator(baseline)
     detail = []
     ok = True
@@ -157,6 +159,50 @@ def _mutate_docx(src: pathlib.Path, dest: pathlib.Path, fn) -> None:
             zout.writestr(n, payload)
 
 
+def _flip_heading1_bold(styles: bytes) -> bytes:
+    """Restore bold on Heading1 (mutation: profile declares heading_bold=false).
+    The produced styles.xml is pandoc-serialised ("<w:b w:val="0" />")."""
+    text = styles.decode("utf-8")
+    m = re.search(r'<w:style [^>]*w:styleId="Heading1"[^>]*>.*?</w:style>', text, re.S)
+    if not m:
+        raise AssertionError("no Heading1 style block")
+    block = m.group(0)
+    new_block = re.sub(r'<w:b w:val="0"\s*/>', '<w:b w:val="1" />', block, count=1)
+    if new_block == block:
+        raise AssertionError("Heading1 carries no explicit w:b val=0")
+    return (text[:m.start()] + new_block + text[m.end():]).encode("utf-8")
+
+
+def _center_abstract_title(styles: bytes) -> bytes:
+    """Re-center the abstract/keywords label (mutation: profile declares left)."""
+    text = styles.decode("utf-8")
+    m = re.search(r'<w:style [^>]*w:styleId="AbstractTitle"[^>]*>.*?</w:style>', text, re.S)
+    if not m:
+        raise AssertionError("no AbstractTitle style block")
+    block = m.group(0)
+    if not re.search(r'<w:jc w:val="left"\s*/>', block):
+        raise AssertionError("AbstractTitle is not left-aligned")
+    new_block = re.sub(r'<w:jc w:val="left"\s*/>', '<w:jc w:val="center" />', block, count=1)
+    return (text[:m.start()] + new_block + text[m.end():]).encode("utf-8")
+
+
+def _drop_citation_superscript(doc: bytes) -> bytes:
+    """Strip the superscript from one in-text citation run (mutation: coverage
+    assertion must catch the plain citation)."""
+    text = doc.decode("utf-8")
+    pat = re.compile(
+        r'<w:r\b[^>]*>(?:(?!</w:r>).)*?<w:t[^>]*>'
+        r'(\[\d{1,3}(?:-\d{1,3})*(?:,\d{1,3}(?:-\d{1,3})*)*\])</w:t></w:r>', re.S)
+    m = pat.search(text)
+    if not m:
+        raise AssertionError("no citation run found in document.xml")
+    run = m.group(0)
+    if not re.search(r'<w:vertAlign w:val="superscript"\s*/>', run):
+        raise AssertionError(f"citation run {m.group(1)!r} is not superscripted (stale artifact?)")
+    new_run = re.sub(r'<w:vertAlign w:val="superscript"\s*/>', "", run, count=1)
+    return (text[:m.start()] + new_run + text[m.end():]).encode("utf-8")
+
+
 def section_d(paper_root: pathlib.Path) -> None:
     """Negative tests: removing profile values from the artifact must fail the build."""
     import importlib.util
@@ -219,6 +265,16 @@ def section_d(paper_root: pathlib.Path) -> None:
         "blue_lowercase": lambda p: p.__setitem__(
             "word/styles.xml",
             _replace(p["word/styles.xml"], b'w:val="000000"', b'w:val="0f4761"')),
+        # GC-2026-1112-01: heiti headings must not be bold; the artifact must carry
+        # the explicit w:b val=0 the generator writes
+        "heading_bold_restored": lambda p: p.__setitem__(
+            "word/styles.xml", _flip_heading1_bold(p["word/styles.xml"])),
+        # GC-2026-1112-01: the abstract/keywords label must stay left-aligned
+        "abstract_title_centered": lambda p: p.__setitem__(
+            "word/styles.xml", _center_abstract_title(p["word/styles.xml"])),
+        # GC-2026-1112-01: every in-text citation run must be superscripted
+        "citation_superscript_removed": lambda p: p.__setitem__(
+            "word/document.xml", _drop_citation_superscript(p["word/document.xml"])),
     }
     for label, mutate in mutations.items():
         target = tmp / f"{label}.docx"
@@ -312,6 +368,57 @@ def section_g(paper_root: pathlib.Path) -> None:
            + ("; " + "; ".join(bad[:3]) if bad else ""))
 
 
+def section_h(paper_root: pathlib.Path) -> None:
+    """GC-2026-1112-01 positives: the citation rule must neither miss nor overreach."""
+    pat = re.compile(r"\[\d{1,3}(?:-\d{1,3})*(?:,\d{1,3}(?:-\d{1,3})*)*\]")
+    interval = re.compile(r"\[\d+,\s+\d+\]")
+    # <paper>/build/<version>/<title>.docx -> the paper dir is three levels up;
+    # taking .parent.parent yields "build" for every paper (collapsed into one
+    # key and made paper_root/key resolve to papers/build — found 2026-11-12).
+    docs = {d.parents[2].name: d for d in _current_docx(paper_root)}
+
+    # (1) P4's interval notation [12, 40] must NOT be superscripted
+    p4 = next((v for k, v in docs.items() if k.startswith("P4-")), None)
+    if p4 is None:
+        record("H. interval [12, 40] not superscripted (P4)", False, "no P4 build found")
+    else:
+        doc = zipfile.ZipFile(p4).read("word/document.xml").decode("utf-8")
+        plain, raised = 0, 0
+        for rm in re.finditer(r"<w:r\b[^>]*>.*?</w:r>", doc, re.S):
+            tm = re.search(r"<w:t[^>]*>([^<]*)</w:t>", rm.group(0))
+            if tm and interval.search(tm.group(1)):
+                if re.search(r'<w:vertAlign w:val="superscript"\s*/>', rm.group(0)):
+                    raised += 1
+                else:
+                    plain += 1
+        record("H. interval [12, 40] not superscripted (P4)",
+               plain > 0 and raised == 0,
+               f"{plain} plain interval run(s), {raised} wrongly raised")
+
+    # (2) per paper: docx citation count == markdown source count (Bibliography
+    #     entries excluded on both sides)
+    detail, ok = [], True
+    for key in sorted(docs):
+        paper_dir = paper_root / key
+        md = (paper_dir / "body" / "paper.md").read_text(encoding="utf-8")
+        md_wo_bib = re.sub(
+            r'::: \{custom-style="Bibliography"\}\n.*?\n:::\n', "", md, flags=re.S)
+        src_count = len(pat.findall(md_wo_bib))
+        doc = zipfile.ZipFile(docs[key]).read("word/document.xml").decode("utf-8")
+        docx_count = 0
+        for pm in re.finditer(r"<w:p\b.*?</w:p>", doc, re.S):
+            para = pm.group(0)
+            st = re.search(r'<w:pStyle w:val="([^"]+)"', para)
+            if st and st.group(1) in ("Bibliography", "SourceCode"):
+                continue
+            for tm in re.finditer(r"<w:t[^>]*>([^<]*)</w:t>", para):
+                docx_count += len(pat.findall(tm.group(1)))
+        detail.append(f"{key[:2]}={docx_count}/{src_count}")
+        if docx_count != src_count:
+            ok = False
+    record("H. citation count parity (docx == markdown source)", ok, "; ".join(detail))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Reproducible verification of the layout change")
     ap.add_argument("--paper-root", default=str(PAPERS_ROOT))
@@ -325,6 +432,7 @@ def main() -> int:
     section_e(paper_root)
     section_f()
     section_g(paper_root)
+    section_h(paper_root)
 
     failed = [r for r in results if not r[1]]
     print(f"\nTOTAL {len(results)}  PASS {len(results) - len(failed)}  FAIL {len(failed)}")

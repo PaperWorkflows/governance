@@ -346,6 +346,59 @@ P2 视觉验收发现：英文摘要整段落到了**第 2 页**，首页下方�
 
 ---
 
+## 14. 第四轮：插图在产物中缺失（投稿件硬伤）与图路径规范化
+
+### 14.1 缺陷
+
+七篇论文的 `body/paper.md` 共引用 24 张插图，但**产物里的插图数一度为 0**。实测三层根因：
+
+1. **路径形式决定 pandoc 是否生成栅格备选**。实测（受控探测件）：
+   - `![x](figures/t.svg)` → pandoc 产出 **SVG + PNG 备选**（6 个 media / 3 图）；
+   - `![x](../figures/t.svg)` → pandoc 只产出 **SVG**（4 个 media / 4 图），**无栅格备选**。
+   带 `..` 的路径使 pandoc 走"外部资源"分支，不生成 PNG 兜底。
+   P2/P3 的正文用的正是 `../figures/`（其余五篇用 `figures/`）。
+2. **pandoc 的 docx 写入把 SVG 作为 `<asvg:svgBlip>` 备选嵌入**（主图是 PNG 兜底）。**LibreOffice 优先取 SVG 备选且渲染不出** → docx 转 PDF 后图位全空。
+3. **构建链对此完全沉默**：pandoc 对未取到的资源只发 `WARNING`，`paper.py` 只看退出码 → **构建成功、产物缺图**。P2 的 `build-record.md` 曾把"产物 0 图"如实记为已知问题，但没有任何机制阻止它再次发布。
+
+### 14.2 修复（治理侧）
+
+| # | 位置 | 内容 |
+|---|---|---|
+| 1 | `tools/paper.py` 构建命令 | `--resource-path` 追加 `<paper>/body`，使 `../figures/` 与 `figures/` 两种形式都能解析到文件 |
+| 2 | `tools/paper.py` 构建后处理 | 新增 `_strip_svg_alternatives`：仅当同一 `<a:blip>` 存在**栅格兜底**时，才剥离 `asvg:svgBlip` 的 SVG 备选；SVG 是唯一图像时**保留**（否则会删掉图本身）。产物 docx 只留 PNG，LibreOffice 与 Word 均可渲染；SVG 源文件仍在论文仓 `figures/`，供目标刊 S19 的 SVG 附件 |
+| 3 | `tools/paper.py` 构建断言 | **图数断言**：正文引用的图数必须 ≤ 产物 `word/media/` 数，否则**构建失败**（不再允许缺图发布） |
+| 4 | `tools/paper.py` 构建断言 | PDF 级核对：产物 PDF 必须含图（`pdfimages` 计数），纳入 manifest 记录 |
+| 5 | 宿主环境 | 安装 `librsvg2-bin`（pandoc 的 SVG 光栅化依赖），使 pandoc 能生成 PNG 兜底 |
+
+### 14.3 论文侧（两个独立提交，每个只含 `body/paper.md`）
+
+P3 `2c51a46`、P2 `588673f`：图片引用路径前缀 `../figures/` → `figures/`，**4 处/篇，正文文字逐字未变**。P3 改后 docx media 由 4（纯 SVG）变为 4（纯 PNG），**PDF 插图数由 0 变为 8**（4 图 + 4 透明蒙版）。
+
+### 14.4 终检（七篇）
+
+| 论文 | 引用 | docx media | PDF 插图 | 页数 | check |
+|---|---|---|---|---|---|
+| P1 | 3 | 3 | 6 | 23 | pass |
+| P2 | 4 | 4 | 4 | 34 | pass |
+| P3 | 4 | 4 | 8 | 15 | pass |
+| P4 | 3 | 3 | 3 | 20 | pass |
+| P5 | 3 | 3 | 5 | 18 | pass |
+| P6 | 4 | 4 | 8 | 18 | pass |
+| P7 | 4 | 4 | 8 | 21 | pass |
+
+`python3 -I tools/verify_layout.py` → **26/26 PASS**（含并发会话新增的 H 组：区间 `[12,40]` 不上标、引用计数 docx==源）。
+
+### 14.5 本轮新增开放项
+
+27. **章文件（草稿）仍残留 `../figures/` 形式**：P2 的 4 个章文件、P3 的 2 个章文件。构建只读 `body/paper.md`（PF-B2），当前无碍，但**下次重新组装正文会把该形式带回来**。须在组装环节统一路径形式，或把约定写进章文件模板。
+28. **manifest 缺页数字段**：PF-B7 明列 manifest 应含页数，当前只能靠账本补记；属治理仓 `tools/paper.py` 待补项。
+29. **PDF 的 sha256 不可作幂等判据**（LibreOffice 在 PDF 内写入时间戳）：幂等锚点应取 docx 的 sha256。
+
+---
+
+
+---
+
 *GC-2026-1111-02。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B3/PF-B10/PF-B11–PF-B14；验证入口 tools/verify_layout.py。*
 
 ---

@@ -311,6 +311,13 @@ def merged_role(merged: dict) -> dict:
         "first_line_indent_chars": t.get("first_line_indent_chars", 0),
         "paragraph": t.get("paragraph", {}) or {},
         "heading_numbering": t.get("heading_numbering", {}) or {},
+        # GC-2026-1112-01: heiti-face weight / abstract-label alignment. None means
+        # the profile does not state the dimension — the generator then keeps its
+        # pre-GC-2026-1112-01 behaviour (bold on, label centered) and the landing
+        # assertion records the dimension as skipped (PF-B12 no-silent-degradation).
+        "heading_bold": t.get("heading_bold"),
+        "caption_bold": t.get("caption_bold"),
+        "abstract_label_alignment": t.get("abstract_label_alignment"),
         "fonts": {
             "body": font(None, None),
             "title": font(fonts.get("title_east_asia"), fonts.get("title_latin") or latin),
