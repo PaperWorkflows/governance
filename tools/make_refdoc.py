@@ -235,7 +235,8 @@ def _apply_ppr(block: str, *, align: str | None = None,
                first_line_chars: float | None = None, first_line_pt: float | None = None,
                hanging_cm: float | None = None, space_before_pt: float | None = None,
                space_after_pt: float | None = None, line_spacing: float | None = None,
-               keep_with_next: bool | None = None) -> str:
+               keep_with_next: bool | None = None,
+               keep_lines: bool | None = None) -> str:
     block = _ensure_element(block, "w:pPr", ("w:rPr", "w:tblPr", "w:trPr", "w:tcPr", "w:tblStylePr"))
     span = _find_element(block, "w:pPr")
     assert span is not None
@@ -249,6 +250,12 @@ def _apply_ppr(block: str, *, align: str | None = None,
     if keep_with_next is not None:
         inner = _insert_ordered(inner, "w:keepNext",
                                 '<w:keepNext w:val="%s"/>' % ("1" if keep_with_next else "0"), PPR_ORDER)
+    if keep_lines is not None:
+        # Cancel the inherited keepLines: a long abstract must be allowed to break
+        # across pages, otherwise it is pushed whole to the next page and leaves a
+        # third of the first page empty (found on P2, 2026-11-12).
+        inner = _insert_ordered(inner, "w:keepLines",
+                                '<w:keepLines w:val="%s"/>' % ("1" if keep_lines else "0"), PPR_ORDER)
     if any(v is not None for v in (space_before_pt, space_after_pt, line_spacing)):
         attrs = []
         if space_before_pt is not None:
@@ -688,13 +695,17 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
                            rpr={"fonts": f["heading"], "size_pt": s.get("abstract_label"),
                                 "bold": True, "black": True},
                            ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
-                                "space_before_pt": 6, "space_after_pt": 0, "keep_with_next": True})
+                                "space_before_pt": 6, "space_after_pt": 0,
+                                "keep_with_next": True, "keep_lines": False})
     styles = _patch_style(styles, "Abstract",
                            rpr={"fonts": f["abstract"], "size_pt": s.get("abstract"), "black": True},
                            ppr={"align": "both", "first_line_chars": 0, "first_line_pt": 0,
                                 "space_before_pt": 0, "space_after_pt": 6,
-                                "keep_with_next": False})  # break keepNext chain: abstract body must not
-                                   # drag keywords/intro to the next page (PF-B6 round 2, 2026-11-11)
+                                "keep_with_next": False,  # break keepNext chain: abstract body must not
+                                # drag keywords/intro to the next page (PF-B6 round 2, 2026-11-11)
+                                "keep_lines": False})  # cancel the inherited keepLines: a long abstract
+                                # is otherwise pushed whole to the next page, leaving page 1 a third
+                                # empty (found on P2, 2026-11-12)
 
     heading_space = {1: (12, 6), 2: (6, 3), 3: (6, 3), 4: (3, 0), 5: (3, 0)}
     for level in range(1, 6):
