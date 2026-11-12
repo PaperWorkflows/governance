@@ -2561,6 +2561,30 @@ def _cmd_build_docx_impl(args) -> tuple:
         out_dir.mkdir(parents=True, exist_ok=True)
         safe_title = _posix_safe_title(title)
         docx_out = out_dir / f"{safe_title}.docx"
+        # PF-B7: a PUBLISHED version must not be modified in place; old versions are
+        # preserved. A pending draft (review_status != "pending") is not published and
+        # may be rebuilt in place. Rebuilding a published release with different
+        # content silently destroys its release record — refuse and ask for a
+        # version bump (PF-V3) instead.
+        if docx_out.exists():
+            existing = docx_out.read_bytes()
+            if existing != output_file.read_bytes():
+                published = False
+                prev_manifest = out_dir / "manifest.json"
+                if prev_manifest.exists():
+                    try:
+                        published = json.loads(prev_manifest.read_text(encoding="utf-8")).get(
+                            "review_status", "pending") != "pending"
+                    except Exception:  # noqa: BLE001
+                        published = True
+                if published:
+                    return ({"status": "error",
+                             "error": (f"build/{version}/ holds a PUBLISHED release with "
+                                       f"different content; modifying a published version "
+                                       f"in place would destroy its release record "
+                                       f"(PF-B7). Bump paper_version (PF-V3) to publish a "
+                                       f"new version."),
+                             "stage": "publish", "existing_artifact": str(docx_out)}, 2)
         shutil.copy2(output_file, docx_out)
         manifest = {
             "release_id": f"BUILD-{version}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
