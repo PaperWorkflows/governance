@@ -1947,6 +1947,68 @@ def _posix_safe_title(title: str) -> str:
     return re.sub(r'[/\\:*?"<>|\s]+', "_", title).strip("_") or "paper"
 
 
+def _first_author_name(dest: Path, paper_cfg: dict):
+    """PF-B7: the first author of the release (roles contains 'first').
+
+    paper.yaml authors first, authors.yaml as the fallback. The build path and
+    the package path call THIS helper, so the built artifact name and the
+    package skeleton name can never diverge (GC-2026-1112-04, T9).
+    Returns None when no first author is registered.
+    """
+    first_author = None
+    for a in paper_cfg.get("authors") or []:
+        if isinstance(a, dict) and "first" in (a.get("roles") or []):
+            first_author = a.get("name")
+            break
+    if not first_author:
+        for a in (_load_yaml_mapping(dest / "authors.yaml").get("authors") or []):
+            if isinstance(a, dict) and "first" in (a.get("roles") or []):
+                first_author = a.get("name")
+                break
+    return first_author
+
+
+def _release_file_stem(title: str, first_author: str) -> str:
+    """PF-B7 release file name: 标题（第一作者中文名）, POSIX-safe.
+
+    One expression for both the build path and the package path — the built
+    artifact and the package skeleton always carry the same name.
+    """
+    return _posix_safe_title(f"{title}（{first_author}）")
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write a JSON file atomically (temp file + os.replace).
+
+    The release manifest IS the release record (PF-B7); a half-written file
+    would destroy it, so the replacement is atomic.
+    """
+    import os
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, ensure_ascii=False, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        # mkstemp creates 0600 — the replaced file keeps its own mode (or the
+        # process default), so an atomic rewrite never narrows the access rights.
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except FileNotFoundError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _norm_version(v: str) -> str:
     v = (v or "0.1.0").strip()
     return v if v.startswith("v") else f"v{v}"
@@ -2729,6 +2791,24 @@ def _cmd_build_docx_impl(args) -> tuple:
     except Exception as exc:
         # A malformed paper.yaml is a build failure, not a fallback to the draft profile.
         return ({"status": "error", "error": f"paper.yaml is unreadable: {exc}", "stage": "pre-build"}, 2)
+    # PF-B7 (GC-2026-1112-04): the release file name is 标题（第一作者中文名）. The first
+    # author is resolved BEFORE any build work — the name is part of the release
+    # record, so it is never guessed (missing → the build fails with the fix hint).
+    try:
+        first_author = _first_author_name(dest, paper_cfg)
+    except Exception as exc:  # noqa: BLE001 - a broken authors.yaml is a naming failure
+        return ({"status": "error",
+                 "error": (f"the first author could not be read for the PF-B7 release file "
+                           f"name: {exc}. Register the first author with roles: ['first'] "
+                           f"in paper.yaml (or in authors.yaml)."),
+                 "stage": "pre-build"}, 2)
+    if not first_author:
+        return ({"status": "error",
+                 "error": ("no first author found — PF-B7 requires the release file name to be "
+                           "标题（第一作者中文名）. Register the first author in paper.yaml "
+                           "(authors: - name: <中文名>, roles: [first]) or in authors.yaml, "
+                           "then rebuild."),
+                 "stage": "pre-build"}, 2)
     snapshot = _create_snapshot(dest)
     try:
         result = subprocess.run(["pandoc", "--version"], capture_output=True, text=True, timeout=5)
@@ -2760,6 +2840,10 @@ def _cmd_build_docx_impl(args) -> tuple:
 
     version = _norm_version(info["version"])
     title = info["title"] if info["title"] != "(untitled)" else paper_cfg.get("title") or "未命名稿件"
+    # The release name uses the paper.yaml title verbatim (the package path uses
+    # the same expression), so the built artifact and the package skeleton share
+    # one stem even for a multi-line title.
+    release_title = str(paper_cfg.get("title") or "").strip() or title
     title_en = paper_cfg.get("title_en")
     manuscript_kind = paper_cfg.get("manuscript_kind") or "research"
 
@@ -2858,7 +2942,7 @@ def _cmd_build_docx_impl(args) -> tuple:
         import shutil
         out_dir = dest / "build" / version
         out_dir.mkdir(parents=True, exist_ok=True)
-        safe_title = _posix_safe_title(title)
+        safe_title = _release_file_stem(release_title, first_author)
         docx_out = out_dir / f"{safe_title}.docx"
         # PF-B7: a PUBLISHED version must not be modified in place; old versions are
         # preserved. A pending draft (review_status != "pending") is not published and
@@ -2885,6 +2969,33 @@ def _cmd_build_docx_impl(args) -> tuple:
                                        f"new version."),
                              "stage": "publish", "existing_artifact": str(docx_out)}, 2)
         shutil.copy2(output_file, docx_out)
+        manifest_file = out_dir / "manifest.json"
+        # T1 (GC-2026-1112-04): a rebuild must not silently reset the release state.
+        # The review status is INHERITED from the manifest being replaced (a
+        # published release stays published), and a prior package assembly is
+        # marked stale — the assembly no longer describes the new release.
+        prev_manifest: dict = {}
+        if manifest_file.exists():
+            try:
+                loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    prev_manifest = loaded
+            except Exception:  # noqa: BLE001 - an unreadable manifest counts as absent
+                prev_manifest = {}
+        prev_submission = prev_manifest.get("submission")
+        if not isinstance(prev_submission, dict):
+            prev_submission = {}
+        review_status = prev_manifest.get("review_status") or "pending"
+        # PF-B7: the release manifest carries the submission metadata set
+        # (abstract, keywords, authors with biographies, conclusion, character
+        # counts, submission direction). Every field is extracted on its own:
+        # a failure nulls that field and records a gap — the build never dies
+        # on a missing anchor (DD-2).
+        submission, submission_warnings = _build_submission_block(dest, paper_cfg, release_title)
+        if prev_submission.get("package_status") == "assembled":
+            submission["package_status"] = "stale"
+            submission["package_manifest_sha256"] = None
+            submission["stale_note"] = "rebuild invalidated prior assembly; re-run package"
         manifest = {
             "release_id": f"BUILD-{version}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
             "paper_id": info["id"],
@@ -2914,15 +3025,29 @@ def _cmd_build_docx_impl(args) -> tuple:
             },
             "body_source": "body/paper.md",
             "artifacts": [{"format": "docx", "path": str(docx_out.relative_to(dest)), "sha256": hashlib.sha256(docx_out.read_bytes()).hexdigest()[:16], "size": docx_out.stat().st_size}],
-            "review_status": "pending",
+            "review_status": review_status,
+            "submission": submission,
             "limitations": [n for n in layout_notes if n.get("check", "").endswith("_limitation")],
         }
-        manifest_file = out_dir / "manifest.json"
-        manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        _atomic_write_json(manifest_file, manifest)
         current_json = dest / "build" / "current.json"
         current_json.write_text(json.dumps({"paper_version": version, "manifest_path": f"build/{version}/manifest.json"}, ensure_ascii=False), encoding="utf-8")
+        # G-5: the naming switch leaves the old-named artifacts of a pending
+        # version in the build directory. Nothing is deleted here (PF-B7: old
+        # versions are preserved) — the leftovers are declared in the output.
+        leftovers = sorted(p.name for p in out_dir.glob("*")
+                           if p.is_file() and p.suffix in (".docx", ".pdf")
+                           and p.stem != safe_title)
+        notices = [f"{name} — the release file name is now '{safe_title}' (PF-B7); the old-named "
+                   f"artifact of a pending version is kept, not deleted" for name in leftovers]
         return ({"status": "ok", "paper_id": info["id"], "paper_version": version, "layout_profile": layout["profile_name"],
                      "format": "docx", "output_path": str(docx_out), "manifest_path": str(manifest_file),
+                     "artifact_stem": safe_title,
+                     "review_status": review_status,
+                     "stale_artifact_names": leftovers,
+                     "artifact_name_notices": notices,
+                     "submission_gaps": submission.get("submission_gaps") or [],
+                     "submission_warnings": submission_warnings,
                      "layout_assertions": "pass", "override_log_entries": len(layout["override_log"])}, 0)
     except subprocess.TimeoutExpired:
         return ({"status": "error", "error": "pandoc timeout (120s)"}, 2)
@@ -2980,7 +3105,7 @@ def cmd_build_pdf(args):
                     manifest.setdefault("limitations", []).append(
                         {"kind": "font_inventory_unavailable",
                          "detail": "pdffonts could not be run; embedded fonts could not be verified"})
-                    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                    _atomic_write_json(manifest_path, manifest)
                     return ({"status": "error",
                              "error": "PDF font inventory could not be produced (pdffonts unavailable) — "
                                       "the PDF cannot be verified and must not be published",
@@ -2997,7 +3122,9 @@ def cmd_build_pdf(args):
                     manifest.setdefault("limitations", []).append(
                         {"kind": "font_substitution", "detail": "profile fonts absent from PDF",
                          "missing": missing})
-                manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                # The whole manifest is written back — the PF-B7 submission block
+                # written by the docx step is preserved as it stands.
+                _atomic_write_json(manifest_path, manifest)
             return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path), "pdf_fonts": sorted(set(pdf_fonts)) if pdf_fonts else []})
         else:
             return emit({"status": "error", "error": "LibreOffice PDF conversion failed", "stderr": result.stderr[:500]}, 1)
@@ -3636,6 +3763,138 @@ def _package_direction(spec: dict) -> tuple[str | None, dict, list, list]:
     return direction, check, gaps, notes
 
 
+def _build_submission_block(dest: Path, paper_cfg: dict, release_title: str) -> tuple[dict, list[str]]:
+    """PF-B7 release manifest submission metadata set (GC-2026-1112-04).
+
+    Every field is extracted on its own: an extraction failure nulls THAT field,
+    records a gap and emits a warning line — the build is never interrupted
+    (DD-2). The package path is the strict twin of this block (A3 compares them
+    field by field), so both read the same sources the same way.
+    """
+    gaps: list[dict] = []
+    warnings: list[str] = []
+
+    def note(kind: str, field: str, detail: str, **extra):
+        gaps.append({"kind": kind, "field": field, "detail": detail, **extra})
+        warnings.append(f"submission.{field}: {detail}")
+
+    # ── the writing spec carries the anchors (conclusion heading, direction) ──
+    spec: dict = {}
+    try:
+        spec = _load_yaml_mapping(dest / "writing-spec.yaml")
+    except Exception as exc:  # noqa: BLE001 - a broken spec is a gap, not a build failure
+        note("writing_spec_unreadable", "writing_spec",
+             f"writing-spec.yaml could not be loaded ({exc}); the conclusion anchor and the "
+             f"submission direction are unavailable")
+
+    # ── abstract / keywords / English-abstract presence ──
+    abstract_zh = None
+    keywords_zh = None
+    abstract_en_present = None
+    try:
+        text, keywords, en_present, field_errors = _extract_abstract(dest, spec)
+        abstract_zh = text or None
+        keywords_zh = keywords or None
+        abstract_en_present = bool(en_present)
+        if abstract_zh is None:
+            note("abstract_zh_missing", "abstract_zh", "the Chinese abstract is empty")
+        if keywords_zh is None:
+            note("keywords_zh_missing", "keywords_zh", "no keyword list was parsed")
+        for err in field_errors:
+            err_field, _, err_detail = str(err).partition(": ")
+            note("abstract_field_error", err_field or "abstract_zh", err_detail or str(err))
+    except Exception as exc:  # noqa: BLE001
+        note("abstract_extraction_failed", "abstract_zh",
+             f"the Chinese abstract could not be extracted ({exc})")
+
+    # ── authors (name/affiliations/roles/email/corresponding/bio) ──
+    authors = None
+    bio_gaps: list[dict] = []
+    try:
+        entries, _bios, bio_gaps = _package_authors(dest, paper_cfg)
+        authors = entries or None
+        if authors is None:
+            note("authors_missing", "authors", "no author is registered")
+        for g in bio_gaps:
+            gap = dict(g)
+            gap.setdefault("field", "authors")
+            gaps.append(gap)
+            warnings.append(f"submission.authors: {gap.get('kind')} — {gap.get('detail')}")
+    except Exception as exc:  # noqa: BLE001
+        note("authors_extraction_failed", "authors",
+             f"the author list could not be extracted ({exc})")
+
+    # ── body range, conclusion and the character counts ──
+    conclusion = None
+    body_chars_value = None
+    total_chars_value = None
+    components = {"abstract_zh": None, "body": None, "references": None, "total": None}
+    try:
+        body = _package_body(dest, spec)
+        conclusion = body["conclusion"] or None
+        if conclusion is None:
+            note("conclusion_missing", "conclusion", "the conclusion range is empty")
+        body_chars_value = _count_nonwhitespace_chars(body["body_text"])
+        refs_chars = _count_nonwhitespace_chars(body["references_text"])
+        abstract_chars = _count_nonwhitespace_chars(abstract_zh or "")
+        total_chars_value = abstract_chars + body_chars_value + refs_chars
+        components = {"abstract_zh": abstract_chars, "body": body_chars_value,
+                      "references": refs_chars, "total": total_chars_value}
+    except Exception as exc:  # noqa: BLE001
+        note("body_extraction_failed", "conclusion",
+             f"the body range / conclusion could not be extracted ({exc})")
+
+    # ── submission direction (PF-B16: a verbatim item of the registered list) ──
+    direction = None
+    direction_check = None
+    try:
+        direction, direction_check, dir_gaps, _dir_notes = _package_direction(spec)
+        for g in dir_gaps:
+            gap = dict(g)
+            gap.setdefault("field", "submission_direction")
+            gaps.append(gap)
+            warnings.append(f"submission.submission_direction: {gap.get('detail')}")
+    except Exception as exc:  # noqa: BLE001
+        note("direction_extraction_failed", "submission_direction",
+             f"the submission direction could not be extracted ({exc})")
+
+    # ── the character-count band (writing-spec min/max; INFO level, PF-RV8) ──
+    min_chars = spec.get("min_chars")
+    max_chars = spec.get("max_chars")
+    band = {"min_chars": min_chars, "max_chars": max_chars, "level": "INFO", "status": "unknown"}
+    if isinstance(min_chars, int) and isinstance(max_chars, int) and body_chars_value is not None:
+        if body_chars_value < min_chars:
+            band["status"] = "below_min"
+        elif body_chars_value > max_chars:
+            band["status"] = "above_max"
+        else:
+            band["status"] = "in_band"
+    counting_note = (f"{CHAR_COUNT_METHOD}；total = 摘要 + 正文 + 参考文献；"
+                     f"正文带宽 {min_chars}–{max_chars} 字（writing-spec；INFO 级，裁定权在 PF-RV8）")
+
+    block = {
+        "title": release_title,
+        "title_en": paper_cfg.get("title_en"),
+        "abstract_zh": abstract_zh,
+        "abstract_en_present": abstract_en_present,
+        "keywords_zh": keywords_zh,
+        "authors": authors,
+        "bio_gaps": bio_gaps,
+        "conclusion": conclusion,
+        "body_chars": {"value": body_chars_value, "methodology": CHAR_COUNT_METHOD,
+                       "components": dict(components), "band": band},
+        "total_chars": {"value": total_chars_value, "methodology": CHAR_COUNT_METHOD,
+                        "components": dict(components)},
+        "submission_direction": direction,
+        "submission_direction_check": direction_check,
+        "counting_note": counting_note,
+        "submission_gaps": gaps,
+        "package_manifest_sha256": None,
+        "package_status": "not_assembled",
+    }
+    return block, warnings
+
+
 def _find_release_artifact(build_dir: Path, suffix: str, preferred_stem: str) -> Path:
     candidates = sorted(p for p in build_dir.glob(f"*{suffix}") if p.is_file())
     if not candidates:
@@ -3660,19 +3919,10 @@ def _package_plan(dest: Path, version: str) -> dict:
     title = str(paper_cfg.get("title") or "").strip()
     if not title:
         raise PackageFailure("paper.yaml carries no title")
-    first_author = None
-    for a in paper_cfg.get("authors") or []:
-        if isinstance(a, dict) and "first" in (a.get("roles") or []):
-            first_author = a.get("name")
-            break
-    if not first_author:
-        for a in (_load_yaml_mapping(dest / "authors.yaml").get("authors") or []):
-            if isinstance(a, dict) and "first" in (a.get("roles") or []):
-                first_author = a.get("name")
-                break
+    first_author = _first_author_name(dest, paper_cfg)
     if not first_author:
         raise PackageFailure("no first author found — paper.yaml/authors.yaml must register roles containing 'first'")
-    stem = _posix_safe_title(f"{title}（{first_author}）")
+    stem = _release_file_stem(title, first_author)
 
     build_dir = dest / "build" / version
     if not build_dir.is_dir():
@@ -3850,6 +4100,85 @@ def _package_plan(dest: Path, version: str) -> dict:
     }
 
 
+def _norm_cmp_text(value):
+    """Comparison normalisation: a text field compares after strip()."""
+    return value.strip() if isinstance(value, str) else value
+
+
+def _norm_cmp_list(value):
+    """Comparison normalisation: a list of strings compares after strip() each."""
+    if not isinstance(value, list):
+        return value
+    return [v.strip() if isinstance(v, str) else v for v in value]
+
+
+def _norm_cmp_bio(value):
+    """Comparison normalisation: a biography field map compares after strip()."""
+    if not isinstance(value, dict):
+        return value
+    return {k: (v.strip() if isinstance(v, str) else v) for k, v in value.items()}
+
+
+def _norm_cmp_authors(authors):
+    """The A3 author comparison sub-domain (G-7): name + roles + corresponding + bio.
+
+    The affiliation and the e-mail are recorded but not compared — they belong
+    to the author registration, not to the release/package shared set.
+    """
+    if not isinstance(authors, list):
+        return authors
+    out = []
+    for a in authors:
+        if not isinstance(a, dict):
+            out.append(a)
+            continue
+        out.append({
+            "name": _norm_cmp_text(a.get("name")),
+            "roles": _norm_cmp_list(a.get("roles")),
+            "corresponding": bool(a.get("corresponding")),
+            "bio": _norm_cmp_bio(a.get("bio")),
+        })
+    return out
+
+
+def _norm_cmp_chars(value):
+    """The A3 character-count comparison value (the submission block nests it)."""
+    if isinstance(value, dict):
+        return value.get("value")
+    return value
+
+
+def _compare_submission_block(submission: dict, manifest: dict) -> list[dict]:
+    """PF-B7 shared-field equality between the release submission block and the
+    package manifest (A3 extension, GC-2026-1112-04).
+
+    The compared set is fixed: title, title_en, abstract_zh, keywords_zh, the
+    authors sub-domain, conclusion, body_chars.value, total_chars.value and
+    submission_direction. Every comparison is made on the normalised value.
+    """
+    diffs: list[dict] = []
+
+    def cmp(field, left, right):
+        if left != right:
+            diffs.append({"field": field, "release_manifest": left, "package_manifest": right})
+
+    cmp("title", _norm_cmp_text(submission.get("title")), _norm_cmp_text(manifest.get("title")))
+    cmp("title_en", _norm_cmp_text(submission.get("title_en")), _norm_cmp_text(manifest.get("title_en")))
+    cmp("abstract_zh", _norm_cmp_text(submission.get("abstract_zh")),
+        _norm_cmp_text(manifest.get("abstract_zh")))
+    cmp("keywords_zh", _norm_cmp_list(submission.get("keywords_zh")),
+        _norm_cmp_list(manifest.get("keywords_zh")))
+    cmp("authors", _norm_cmp_authors(submission.get("authors")),
+        _norm_cmp_authors(manifest.get("authors")))
+    cmp("conclusion", _norm_cmp_text(submission.get("conclusion")),
+        _norm_cmp_text(manifest.get("conclusion")))
+    cmp("body_chars", _norm_cmp_chars(submission.get("body_chars")), manifest.get("body_chars"))
+    cmp("total_chars", _norm_cmp_chars(submission.get("total_chars")), manifest.get("total_chars"))
+    cmp("submission_direction", _norm_cmp_text(submission.get("submission_direction")),
+        _norm_cmp_text(manifest.get("submission_direction")))
+    return diffs
+
+
 def _materialize_package(plan: dict) -> None:
     """Rebuild the package root from scratch (PF-B16 skeleton)."""
     import shutil
@@ -3925,8 +4254,18 @@ def _package_assertions(plan: dict, manifest: dict) -> list:
     if _norm_version(str(release.get("paper_version", ""))) != _norm_version(str(manifest.get("package_version", ""))):
         diffs.append({"field": "package_version", "release_manifest": release.get("paper_version"),
                       "package_manifest": manifest.get("package_version")})
+    # PF-B7 (GC-2026-1112-04): the release manifest's submission metadata set and
+    # the package manifest must agree field by field — a source drift between the
+    # release and the package is caught here, not in the sender's mailbox.
+    submission = release.get("submission")
+    submission_diffs: list[dict] = []
+    if isinstance(submission, dict):
+        submission_diffs = _compare_submission_block(submission, manifest)
+        diffs = diffs + submission_diffs
     results.append({"id": "A3", "name": "shared fields identical to the release manifest",
-                    "status": "pass" if not diffs else "fail", "differences": diffs})
+                    "status": "pass" if not diffs else "fail", "differences": diffs,
+                    "submission_compared": isinstance(submission, dict),
+                    "submission_differences": submission_diffs})
 
     tables_dir = package_dir / "tables"
     actual_csv = {p.name for p in tables_dir.glob("*.csv")} if tables_dir.is_dir() else set()
@@ -3959,6 +4298,90 @@ def _package_assertions(plan: dict, manifest: dict) -> list:
                     "missing": fig_missing, "extra": fig_extra,
                     "manifest_missing": manifest_fig_missing, "registered_but_absent": registered_missing})
     return results
+
+
+def _package_writeback(dest: Path, version: str, package_manifest_path: Path) -> dict:
+    """Write the package manifest sha256 back into the release manifest (PF-B7).
+
+    Guard (GC-2026-1112-04): the release manifest may take the sha256 only when
+    it is the version build/current.json points at AND its review_status is
+    exactly 'pending' — a superseded version keeps its assembly record in the
+    sidecar, and a published version is never modified in place (PF-B7).
+    The word list is closed: 'pending' only (G-2).
+    """
+    result = {"written": False, "reason": None, "sha256": None,
+              "release_manifest": str(dest / "build" / version / "manifest.json")}
+    manifest_path = dest / "build" / version / "manifest.json"
+    if not manifest_path.exists():
+        result["reason"] = "release_manifest_missing"
+        return result
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        result["reason"] = "release_manifest_unreadable"
+        result["error"] = str(exc)
+        return result
+    if not isinstance(data, dict):
+        result["reason"] = "release_manifest_malformed"
+        return result
+
+    # ── guard 1: the version must be the one build/current.json points at ──
+    current_file = dest / "build" / "current.json"
+    current_version = None
+    if current_file.exists():
+        try:
+            current_version = json.loads(current_file.read_text(encoding="utf-8")).get("paper_version")
+        except Exception:  # noqa: BLE001
+            current_version = None
+    current_version = _norm_version(str(current_version)) if current_version else None
+    if current_version != _norm_version(version):
+        result["reason"] = "superseded_version"
+        result["current_version"] = current_version
+        result["detail"] = (
+            f"build/current.json points at {current_version or 'nothing'} — {version} is a "
+            f"superseded version and its release manifest is not modified (PF-B7: old versions "
+            f"are preserved). The assembly record stays in build/{version}/package-gaps.json "
+            f"(sidecar); bump paper_version (PF-V3) and rebuild if this version is to be published.")
+        return result
+
+    # ── guard 2: only a 'pending' release may take the sha256 ──
+    review_status = data.get("review_status")
+    if review_status != "pending":
+        result["reason"] = "review_status_not_pending"
+        result["review_status"] = review_status
+        result["detail"] = (
+            f"the release manifest of {version} carries review_status={review_status!r} — only a "
+            f"'pending' release may take the package sha256 (a published version is never modified "
+            f"in place, PF-B7).")
+        return result
+
+    submission = data.get("submission")
+    if not isinstance(submission, dict):
+        result["reason"] = "submission_block_absent"
+        result["detail"] = (
+            f"the release manifest of {version} carries no submission block — the PF-B7 submission "
+            f"metadata set is written by the build; rebuild the release and re-run the package.")
+        return result
+
+    try:
+        digest = hashlib.sha256(package_manifest_path.read_bytes()).hexdigest()
+    except Exception as exc:  # noqa: BLE001
+        result["reason"] = "package_manifest_unreadable"
+        result["error"] = str(exc)
+        return result
+
+    submission["package_manifest_sha256"] = digest
+    submission["package_status"] = "assembled"
+    submission.pop("stale_note", None)
+    data["submission"] = submission
+    try:
+        _atomic_write_json(manifest_path, data)
+    except Exception as exc:  # noqa: BLE001 - a failed write must not report 'assembled'
+        result["reason"] = "writeback_failed"
+        result["error"] = str(exc)
+        return result
+    result.update({"written": True, "reason": "assembled", "sha256": digest})
+    return result
 
 
 def _append_build_record(dest: Path, payload: dict, plan: dict | None) -> None:
@@ -4030,6 +4453,12 @@ def _append_build_record(dest: Path, payload: dict, plan: dict | None) -> None:
         lines.append(f"- 失败断言：{', '.join(payload['failed_assertions'])}")
     if payload.get("strict_reasons"):
         lines.append(f"- strict 原因：{'；'.join(payload['strict_reasons'])}")
+    writeback = payload.get("writeback") or {}
+    if writeback:
+        detail = writeback.get("detail") or writeback.get("error") or ""
+        lines.append(f"- 发布 manifest 回写：{writeback.get('reason')}"
+                     + (f"；sha256 {writeback.get('sha256')}" if writeback.get("sha256") else "")
+                     + (f"；{detail}" if detail else ""))
     lines.append(f"- 本次运行：{status}（退出码 {payload.get('exit_code')}）")
     lines.append("")
     try:
@@ -4121,6 +4550,25 @@ def cmd_package(args):
                 code = 1
         else:
             payload["strict_status"] = "n/a"
+        # ── PF-B7: write the package manifest sha256 back into the release manifest ──
+        # '--verify-only' writes nothing at all; a failed assertion or a failed
+        # --strict run writes nothing either (T6).
+        writeback = {"attempted": False, "written": False, "reason": None, "sha256": None}
+        if mode == "verify":
+            writeback["reason"] = "verify_only_zero_write"
+        elif failed:
+            writeback["reason"] = "assertions_failed_no_writeback"
+        elif payload.get("strict_status") == "fail":
+            writeback["reason"] = "strict_failed_no_writeback"
+        else:
+            writeback["attempted"] = True
+            writeback.update(_package_writeback(dest, version, package_dir / "manifest.json"))
+        payload["writeback"] = writeback
+        if writeback["attempted"] and not writeback["written"]:
+            payload["status"] = "fail"
+            code = 1
+            payload["error"] = (writeback.get("detail") or writeback.get("error")
+                                or "the package sha256 could not be written into the release manifest")
     except PackageFailure as exc:
         payload.update(exc.payload)
         payload.setdefault("stage", "package")

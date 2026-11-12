@@ -175,4 +175,113 @@
 
 ---
 
+## 11. O9 收口记录（GC-2026-1112-04）
+
+- 日期：2026-11-12
+- 编号：**GC-2026-1112-04**（承接本记录 §9 登记的 **O9** 残留；独立成号，实施域 = `tools/paper.py` + 本记录 §11）
+- 计划版本：**v1.1**（`temp/GC-2026-1112-04/plan.md`；v1.0 经 agent-gpt-team（`review-gpt-team.md`）与 agent-glm（`review-glm.md`）并行复核后修订，两份报告在 `temp/GC-2026-1112-04/`，T1/T2 与 G-1/G-2 为实施门禁并已全部吸收）
+- 类型：治理工具链实现（PF-B7 之实现；**无新规则正文，rules_version 保持 0.3.0**）
+- 规则依据：AGENTS.md F9/F5/F6；PF-B7（02 修订句 + "已发布版本不得就地修改 / 旧版本保留"）、PF-B15/B16、PF-B5、PF-V3/V5/V6/V8
+- **流程状态**：**T 已实施，提交待主会话复核后执行**（本次不提交、不 add）
+
+### 11.1 基线（实施时实测）
+
+- **git 基线**：治理仓 HEAD = `9a41208`（"docs(governance): GC-2026-1112-03 记录收口……"）。
+- **开工硬性前置**：`git status --short` = ` M authors/registry.yaml`、` M schemas/layout-profile.schema.json`、` M templates/layout/profiles/stie.yaml`、` M templates/layout/refdoc/stie.docx`、` M tools/make_refdoc.py`、` M tools/verify_layout.py`、`?? governance/changes/2026-11-12-stie-venue-template-alignment.md`——**他线 STIE 版式线整线 6 modified + 1 untracked**（复核 T10/G-6 登记的实况）；`git diff --stat tools/paper.py` = **空**（paper.py 相对 HEAD 干净）→ 满足开工条件，开工未停机。
+- **论文侧基线**：P4 仓（`P4-CONDITIONAL-COMPLETENESS-20251111`）工作树干净，`build/current.json` → **v0.3.2**；`build/v0.3.2/` 产物为**旧命名**（`面向自然资源文献的条件完整性约束检索方法.docx/.pdf`，无第一作者），manifest **无 `submission` 块**、`review_status` = `pending`；七篇 `paper.yaml` 均登记 `roles: [first]`（P5 仅 paper.yaml 有 roles，authors.yaml 无 roles 键）。
+- **宿主工具链**：pandoc 3.9 / LibreOffice 25.2.3.2 / pdffonts / Python 3.13.5 在位（与 P4 既有 manifest 记录的 pandoc 版本一致）。
+
+### 11.2 变更内容（`tools/paper.py`，+466 −18 行，4330 → 4778 行）
+
+| # | 落点 | 内容 |
+|---|---|---|
+| ① | 命名 | 新增 `_first_author_name`（**paper.yaml authors 优先、authors.yaml 兜底、`roles` 含 `first`**）与 `_release_file_stem`（`_posix_safe_title(f"{title}（{first_author}）")`）两个共享助手；**build 路径与 package 路径调用同一对助手**（原 package 3663–3675 内联取法改为调用共享助手，行为与错误文案不变）→ 产物名与包骨架名不可能分叉。build 侧在**任何构建动作之前**解析第一作者：缺失 → 构建失败（退出码 2，`stage: pre-build`），错误文案报 PF-B7 命名要求与修复指向（`paper.yaml` / `authors.yaml` 的 `roles: [first]`）。 |
+| ② | `submission` 块 | docx 阶段向发布 manifest 写入 `submission` 块：`title` / `title_en` / `abstract_zh`（全文）/ `abstract_en_present` / `keywords_zh` / `authors`（name·affiliations·roles·email·corresponding·bio）/ `bio_gaps` / `conclusion`（全文）/ `body_chars{value,methodology,components,band}` / `total_chars{value,methodology,components}` / `submission_direction` / `submission_direction_check` / `counting_note` / `submission_gaps` / `package_manifest_sha256`（初值 null）/ `package_status`（初值 `not_assembled`）。抽取复用 package 侧同源助手（`_extract_abstract` / `_package_authors` / `_package_body` / `_package_direction` / `_count_nonwhitespace_chars`），**逐字段 try/except**：任何异常或未命中 → 该字段 null + `submission_gaps[]` 登记 + 构建输出 warning 行，**构建绝不中断**（`PackageFailure`、yaml 解析异常同被捕获；writing-spec 加载失败归 gaps）。**build 阶段不写论文仓 `build-record.md`**——留痕只走构建输出与 manifest 内 `submission_gaps`（沙盒纪律沿 03 §10.4）。 |
+| ③ | 重建保留语义（T1） | docx 阶段重写 manifest 时：旧 manifest 存在则**继承其 `review_status`**（不再恒写 `pending`；已发布版本重建后仍为已发布，不静默重置）；若旧 `submission.package_status == "assembled"` → 新块置 `package_status: "stale"`、`package_manifest_sha256: null`、`stale_note: "rebuild invalidated prior assembly; re-run package"`；`submission` 块本身按当前源重算。 |
+| ④ | `cmd_build_pdf` | pdf 阶段对**同一 manifest 整份读改写**（追加 formats/artifacts/pdf 字体与 limitations），`submission` 块原样保留；两处写盘改用原子写。 |
+| ⑤ | package 回写 | 断言全过后回写发布 manifest：`submission.package_manifest_sha256`（**64 位全量 hex**，`hashlib.sha256(package/manifest.json)`）+ `submission.package_status = "assembled"`（并清除 `stale_note`）。**守卫 = 版次 == `build/current.json` 指向版次 且 该 manifest `review_status == "pending"`，两判据同时满足才回写**；否则拒绝（退出码 1，提示被取代版次走 sidecar / 版次 bump）。`--verify-only` **零写入**；断言失败或 `--strict` 失败**不回写**；manifest 更新为读 → 改 → **原子写**（临时文件 + `os.replace`）。 |
+| ⑥ | A3 扩展 | A3 在既有 `title` / `package_version` 之外，增列**发布 manifest `submission` 块与包 manifest 的集合级相等核验**：title / title_en / abstract_zh / keywords_zh / **authors（子域 = name + roles + corresponding + bio，逐作者）** / conclusion / `body_chars.value` / `total_chars.value` / submission_direction；比较前 strip 规范化（作者子域按 name/roles 列表/bool/简介字段 map 规范化）；不一致即 A3 fail 并列两侧差异。**legacy 发布 manifest 无 `submission` 块时不参与该项比较**（A3 结果记 `submission_compared: false`），既有旧版次仍可打包。 |
+| 附 | G-5 旧名滞留声明 | 命名切换后旧名产物滞留于 `build/<version>/`：**不删除**（PF-B7 旧版本保留，F6 约束），只在构建输出以 `stale_artifact_names` / `artifact_name_notices` 声明。 |
+| 附 | 原子写 | 新增 `_atomic_write_json`（临时文件 + `fsync` + `os.replace`，并**保持原文件权限位**）；build 与 pdf 的 manifest 写盘、包回写均走该助手。 |
+
+### 11.3 关键裁定
+
+1. **词表统一仅 `pending`**（T3/G-2）：可回写状态**只有 `pending`**（全仓唯一存在值；layout-standards 记录 L327"非 pending 即已发布"的二元语义），**"draft" 废弃不入守卫**——手工置 `draft` 的版本在 build 侧被当作已发布、在 package 侧被拒绝回写，两守卫不再语义相悖。
+2. **`current.json` 指向判据**（G-1）：回写守卫为 **`build/current.json` 指向的版次 且 `review_status == "pending"`** 双判据。被取代版次（如 P4 v0.3.0 / v0.3.1）**装配照做、记录落 sidecar（`package-gaps.json`）、发布 manifest 不回写**，退出码 1 并提示版次 bump——既满足 PF-B7 "旧版本保留"，又堵住"review_status 全仓恒 pending、单一判据实践中永不触发"的洞。
+3. **重建保留语义**（T1/G-4）：`review_status` 继承 + `assembled → stale`；禁止静默重置为 pending、静默抹除装配痕迹。
+4. **A3 子域固定**（T5/G-7）：authors 比较子域 = **name + roles + corresponding + bio（逐作者）**；affiliations 与 email 记录但不比较（属作者登记，非发布/包共享集）。`package_manifest_sha256` 不入比较集（其自身有独立核对：回写值取自包 manifest 文件实算 sha256）。
+5. **DD-2 强化**（T4/G-8）：抽取逐字段 try/except；**warning 留痕走构建输出与 manifest 的 `submission_gaps`，不写论文仓 `build-record.md`**（计划原列的 build-record 留痕在本轮按任务书收回，避免在论文仓产生 tracked hunk）。
+6. **first_author 取法逐字复刻**（T9）：由共享助手 `_first_author_name` 实现，build 与 package 同源；`title` 用 `paper_cfg['title'].strip()`（多行标题下与 package 一致）。
+7. **G-3 legacy 容错**：发布 manifest 缺 `review_status` 字段（legacy）→ 视为**非 pending** → 拒绝回写；缺 `submission` 块 → A3 不参与该项比较。
+8. **`submission_block_absent` 第三守卫**（写后复核 V-1 补记）：目标 manifest **不含 `submission` 块**（GC-2026-1112-04 之前构建的 legacy 版次）时，回写同样拒绝（与 superseded/review_status_not_pending 同级守卫原因），装配与缺口照常落 sidecar——防止向 legacy manifest 就地植入新结构；此类版次如需装配记录，重建新版次后由新 manifest 承接。
+
+### 11.4 验证实测结果（沙盒 `temp/VERIFY-GC-2026-1112-04/`，P4 副本；真实 P4 仓零改动）
+
+| # | 验证项 | 退出码 | 实测结果 |
+|---|---|---|---|
+| 1 | `build docx --paper <沙盒 P4>` | 0 | 产物 `面向自然资源文献的条件完整性约束检索方法（作者A）.docx`；manifest `submission` 块实值（见 §11.5）；`package_status: not_assembled`、`package_manifest_sha256: null`；`review_status: pending` |
+| 1 | `build pdf --paper <沙盒 P4>` | 0 | 产物 `面向自然资源文献的条件完整性约束检索方法（作者A）.pdf`；`submission` 块**原样保留**（abstract 383 字符、body 18722 / total 21108、两作者 + corresponding） |
+| 2 | **T1 负例 a**：手工置 `review_status: released` 后同版次重跑 `build docx` | 0 | manifest `review_status` **仍为 `released`**（未被重置为 pending）——继承语义生效 |
+| 2 | **T1 负例 b**：`package --current` 装配成功后重跑 `build docx` | 0 | `package_status: stale`、`package_manifest_sha256: null`、`stale_note: "rebuild invalidated prior assembly; re-run package"` 三项齐备 |
+| 3 | **G-1 负例**：`package --version v0.3.1`（被取代版次、旧命名产物） | 1 | A1–A5 **全过**（旧命名单候选回退命中）；写回拒绝，`reason: superseded_version`，错误文案指向 sidecar 与版次 bump；**v0.3.1 发布 manifest 未被改写**（仍无 `submission` 块），装配与缺口记录在 sidecar |
+| 4 | **守卫负例**：当前版次 manifest 手工置 `review_status: released` → `package --current` | 1 | 写回拒绝，`reason: review_status_not_pending`；`package_status` 仍 `not_assembled`、`sha256` 仍 null |
+| 5 | **正例**：`package --current` | 0 | A1–A5 全过；回写 `package_manifest_sha256` = 64 位全量 hex（与包 `manifest.json` 实算值**逐字一致**）、`package_status: assembled` |
+| 5 | **篡改**：改发布 manifest `submission.abstract_zh` → `package --current --verify-only` | 1 | **A3 fail**，差异列 `abstract_zh`（两侧值并列）；**零写入**——回填的 sha256 **未被清除**、`package_status` 仍 `assembled`；`writeback.reason: verify_only_zero_write` |
+| 5b | **断言失败不回写（build 模式）**：同上篡改后跑 `package --current`（非 verify） | 1 | A3 fail → 写回未发生（`reason: assertions_failed_no_writeback`），发布 manifest `package_status` 仍 `stale` |
+| 5c | **strict 失败不回写**：删作者简介节副本 → `package --current --strict` | 1 | `strict_status: fail`（2 gap），写回未发生（`reason: strict_failed_no_writeback`） |
+| 6 | **回归 a**：`package --version v0.3.1 --verify-only` | 0 | 旧命名产物单候选回退命中、A1–A5 全过；**verify-only 不受写回守卫拦截**（已发布/被取代版次的发送门槛仍可用） |
+| 6 | **回归 b**：`package --version v0.3.0` | 1 | 旧命名单候选回退命中、A1–A5 全过；写回按 `superseded_version` 拒绝（退出码 1 为守卫语义，非产物缺失） |
+| 6 | **回归 c**：`check --paper` / `build list --paper` | 0 / 0 | `check` status=pass；`build list` 正常返回（P4 无 `output/` 目录，`releases: []` 为既有历史行为，非本次引入） |
+| 6 | **回归 d**：`python3 -I -m py_compile tools/paper.py` | 0 | 通过 |
+| 7 | **DD-2 降级**：P1 副本（结语锚点不命中）`build docx` | 0 | **构建不中断**：`conclusion` / `body_chars.value` / `total_chars.value` 三项 null + 1 条 `body_extraction_failed` gap + 1 行 warning（点名 `conclusion_heading='结语'` 未命中） |
+| 7b | **writing-spec 加载失败**：破坏 YAML 的 P1 副本 `build docx` | 0 | 构建不中断；3 条 gaps（`writing_spec_unreadable` / `body_extraction_failed` / `submission_direction_missing`），下游字段降级为 null |
+| 7c | **缺第一作者**：删除 `roles: [first]` 的副本 `build docx` | 2 | 构建失败（`stage: pre-build`），错误文案报 PF-B7 命名要求与修复指向 |
+| 8 | **变更域核对**：`git status --short` / `git diff --stat` | — | 治理仓 tracked 改动**恰 2 路径**：`tools/paper.py`（+466 −18）与本记录 §11；**他线 STIE 整线 6 modified + 1 untracked 集合不变、未触碰**；论文仓**零 tracked 改动**（真实 P4 `git status --short` 空，manifest 无 `submission` 块、无新命名产物） |
+
+### 11.5 P4 发布 manifest `submission` 块实值样例（沙盒实测）
+
+```json
+{
+  "title": "面向自然资源文献的条件完整性约束检索方法",
+  "title_en": "Conditional Completeness Constrained Retrieval for Natural Resources Documents",
+  "abstract_zh": "自然资源技术文献的指标值、操作要求和判断规则分布于正文、表格、表注及附录。…（383 字符全文）",
+  "abstract_en_present": true,
+  "keywords_zh": ["条件完整性", "类型化依赖图", "证据包", "检索增强生成", "自然资源技术文献"],
+  "authors": [
+    {"name": "作者A", "affiliations": ["云南省自然资源厅<单位已脱敏>"], "roles": ["first"],
+     "email": "<邮箱已脱敏>", "corresponding": false, "bio": {"出生年": "1978", "…": "十字段全"}},
+    {"name": "作者C", "affiliations": ["云南省自然资源厅<单位已脱敏>"], "roles": ["corresponding"],
+     "email": "<邮箱已脱敏>", "corresponding": true, "bio": {"出生年": "1986", "…": "十字段全"}}
+  ],
+  "conclusion": "# 7 结语\n\n## 7.1 工作总结\n…（1407 字符全文）",
+  "body_chars": {"value": 18722, "methodology": "非空白字符（len(re.sub(r'\\s','',text))，含标点/数字/字母），与 P5 既有裁定口径一致",
+                 "components": {"abstract_zh": 369, "body": 18722, "references": 2017, "total": 21108},
+                 "band": {"min_chars": 13000, "max_chars": 16000, "level": "INFO", "status": "above_max"}},
+  "total_chars": {"value": 21108, "methodology": "…", "components": {"abstract_zh": 369, "body": 18722, "references": 2017, "total": 21108}},
+  "submission_direction": "专刊主题：多模态时空大数据处理关键技术及应用研究（方向条目（一）–（四）待作者确认后细化）",
+  "submission_direction_check": {"registered_items": 14, "matched_item": "多模态时空大数据处理关键技术及应用研究", "exact": false},
+  "counting_note": "非空白字符（…）口径；total = 摘要 + 正文 + 参考文献；正文带宽 13000–16000 字（writing-spec；INFO 级，裁定权在 PF-RV8）",
+  "submission_gaps": [],
+  "package_manifest_sha256": null,
+  "package_status": "not_assembled"
+}
+```
+
+- 双字数 **18722（正文）/ 21108（总）** 与 03 记录 §8 第 14 项的口径独立核验值**逐值一致**（真非空白口径，含标点/数字/字母；旧口径 13846 不与之混用）。
+- `band.status: above_max` 仍是 §10.3 第 1 项登记的**正文越上带**（INFO 级，裁定权在 PF-RV8 审稿线），本轮未改该事实。
+
+### 11.6 O9 关闭判定与流程状态
+
+- **O9 关闭判定：O9 关闭（本记录 §9 的登记载体在本节收口）**——O9 的两半（① 新构建按"标题（第一作者中文名）"命名；② 发布 manifest 增记 PF-B16 投稿元数据集与包 `manifest.json` 的 sha256）**均已实现并实测通过**；PF-B7 的"发布 manifest 记录包 manifest sha256"义务由 package 回写兑现，"共享字段两侧必须一致否则失败"由 A3 扩展兑现。
+- **残留与后续（不自行裁定）**：
+  1. **P4 正文越上带**（18722 > 16000）与**投稿方向待确认**沿 §10.3 第 1、2 项，裁定权仍在 PF-RV8 审稿线，本轮只记录不裁定。
+  2. **结语锚点对齐**（P1/P2/P7）沿 §10.3 第 3 项，属论文侧任务；本轮 build 侧已按 DD-2 降级为 null + gap（构建不中断），`package` 侧仍按 S12 硬失败。
+  3. **旧名产物滞留**：真实论文仓首次以新命名重建后，`build/<version>/` 将并存新旧两套产物，清理策略由论文线裁定（工具只声明、不删除）。
+  4. **发表状态翻转方缺失**：`review_status` 全仓恒 `pending`（18/18 份发布 manifest），本轮守卫按"仅 pending 可回写"实现；若将来引入发布流程翻转该字段，须同步复核 build 侧已发布守卫与 package 侧回写守卫（同一闭集）。
+- **流程状态**：**T 已实施、提交待主会话复核后执行**——本次实施**未执行任何 `git add` / `git commit`**；变更域为 `tools/paper.py` 与本记录 §11 两处 tracked 改动，提交由主会话在复核后执行。
+
+---
+
 *GC-2026-1112-03。规则依据：AGENTS.md F9/F5/F6/F7；构建依据 governance/build.md PF-B5/B6/B7/PF-B15/PF-B16（新增 PF-B16 过渡与执行点条款）；字数口径依据 PF-RV8 带宽与 P5 既有裁定；计划 temp/GC-2026-1112-03/plan.md（v1.1）。*
+
+*GC-2026-1112-04（§11 O9 收口）。规则依据：AGENTS.md F9/F5/F6；PF-B7（02 修订句）、PF-B15/B16、PF-B5、PF-V3/V5/V6/V8；计划 temp/GC-2026-1112-04/plan.md（v1.1），复核报告 review-gpt-team.md / review-glm.md 同目录。*
