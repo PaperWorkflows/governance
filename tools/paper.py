@@ -203,11 +203,60 @@ def parse_yaml_value(text: str, key: str) -> str:
     return None
 
 def write_paper_authors(dest: Path, author: dict):
-    """Write per-paper authors.yaml (private repo: full details allowed)."""
+    """Write per-paper authors.yaml (private repo: full details allowed).
+
+    GC-2026-1112-06: the format is the DOCUMENT-LEVEL CONTAINER — schema_version +
+    affiliations registry + authors list, validated by
+    schemas/author.schema.json (urn:paperfactory:author:3). The init state is a
+    VALID container with an EMPTY registry and a skeleton author entry (name_en /
+    affiliation_ids / email / bio unfilled): jsonschema passes, while the SEMANTIC
+    gates (metalayout.validate_metadata, wired into both `check` and the build
+    path) fail with field-level, actionable messages listing what to fill in. That
+    failure state is the correct opening state for a new paper (as verified in the
+    GC-2026-1112-06 final-review rework). The old bare-list output
+    (yaml.dump([author_entry])) overwrote the container template and is gone.
+    """
     authors_path = dest / "authors.yaml"
-    entries = [author]
-    with open(authors_path, "w", encoding="utf-8") as f:
-        yaml.dump(entries, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    author_id = (author.get("id") or "author").lower()
+    name = json.dumps(str(author.get("name") or ""), ensure_ascii=False)
+    skeleton = f"""# Per-Paper Author Registry — 文档级容器格式（GC-2026-1112-06）
+#
+# 顶层必须是映射：schema_version / affiliations（单位注册表，全文唯一一份）/ authors 列表，
+# 由 schemas/author.schema.json 校验；旧式裸列表（顶层 `- id: ...` 数组）已作废。
+# 本文件是 `init` 的骨架开篇：仅预填作者 id/姓名，其余元数据未填——`check`/`build`
+# 会因缺 name_en、affiliation_ids、bio 十字段而失败，并按字段点名（这是新论文的
+# 正确开局状态）。请参照 templates/paper/authors.yaml 的字段注释与格式补齐后再构建。
+
+schema_version: 1
+
+affiliations: []        # 单位注册表（当前为空，init 骨架）。
+  # 全文只声明一份；作者经 affiliation_ids 引用条目 id（^[a-z][a-z0-9_]*$）。
+  # 每条格式：- id: <键>
+  #            name: <中文全称>（一级+二级单位全称，S2）
+  #            name_en: <英文全称>（S5 中英成对，缺失即校验失败）
+  #            city: <市> / city_en: <市拼音> / postcode: <邮编>
+
+authors:
+  # 按署名顺序排列；roles 在 paper.yaml 维护（这里不写角色）。
+  - id: {author_id}
+    name: {name}
+    name_en: null          # 英文名（姓前名后，首词为姓）；缺失即校验失败（S5 中英成对）
+    affiliation_ids: []    # 引用上方 affiliations 注册表条目 id；缺失即校验失败
+    bio:                   # S17 十字段全必填（author.schema.json required）
+      birth_year: null     # 出生年（整数；渲染为「（YYYY 年生）」）
+      gender: null         # 性别（男/女）
+      hometown: null       # 籍贯（渲染为「××人」）
+      degree: null         # 学位
+      title: null          # 职称
+      research_direction: null   # 研究方向（文末简介与「其他作者·从事工作」）
+      address: null        # 通信地址
+      postcode: null       # 邮政编码
+      email: null          # 电子邮箱（bio 内 S17 字段）
+      phone: null          # 电话（字符串）
+    email: null            # 条目级联系邮箱（可选）；bio.email 为简介用
+    orcid: null
+"""
+    authors_path.write_text(skeleton, encoding="utf-8")
 
 def check_gh_available() -> dict:
     """Check if gh CLI is installed and authenticated."""
@@ -573,7 +622,12 @@ def cmd_scaffold(args):
             content = content.replace("paper_version: 0.1.0",
                                       f"paper_version: {args.version or '0.1.0'}")
             pid_number = args.id.split("-")[0]
-            content = content.replace("id: null", f"id: {pid_number}")
+            # GC-2026-1112-06 终审返工（P1-2）：必须行锚定替换。旧写法的子串替换
+            # `content.replace("id: null", ...)` 会把 authors.yaml 的 `orcid: null`
+            # 误改成 `orcid: P<n>`（"or**cid: null**" 含 "id: null" 子串）。行首
+            # 锚定 `^id: null$`（多行模式）只命中独立的 `id:` 键行，orcid 行不命中。
+            content = re.sub(r"^\s*id: null\s*$", f"id: {pid_number}", content,
+                             flags=re.MULTILINE)
             target.write_text(content, encoding="utf-8")
             created.append(str(rel))
 
@@ -2419,9 +2473,10 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
     # in the product means the role silently did not reach the page. This is recorded
     # as a limitation, so a reviewer can see it (PF-B12 no-silent-degradation).
     used = set(re.findall(r'<w:pStyle w:val="([^"]+)"', docxml))
-    # The style each profile role is expected to land in. `affiliation` is NOT
-    # Subtitle: Subtitle carries the English title; the affiliation line falls
-    # back to BlockText until the body is restructured (see change-record §9).
+    # The style each profile role is expected to land in. `affiliation` maps to
+    # the dedicated Affiliation role (GC-2026-1112-06: the generated affiliation
+    # list lands there via make_refdoc when the profile carries an authors domain),
+    # `title_en` to Subtitle (Subtitle carries the English title).
     role_styles = {
         "abstract": "Abstract", "abstract_label": "AbstractTitle",
         "reference_entry": "Bibliography", "reference_heading": "Bibliography",
@@ -2903,6 +2958,22 @@ def _cmd_build_docx_impl(args) -> tuple:
         if metalayout is None:
             return ({"status": "error", "error": f"metalayout unavailable: {_metalayout_error}",
                      "stage": "pre-build"}, 2)
+        # GC-2026-1112-06 终审返工（P3-5）：build 路径也跑语义硬闸 H3–H8
+        # （validate_metadata）。load 级闸（H1 容器形态 / H2 jsonschema）在
+        # assemble_document 内经 load_paper_metadata 生效；语义闸此前只在 check
+        # 生效，新论文 init 骨架（元数据未填）可过 load 但必须在 build 也失败并
+        # 给出可操作提示。
+        try:
+            meta = metalayout.load_paper_metadata(dest)
+            meta_errors = metalayout.validate_metadata(meta)
+        except metalayout.MetalayoutError as exc:
+            return ({"status": "error", "error": f"metadata validation failed: {exc}",
+                     "stage": "pre-build"}, 2)
+        if meta_errors:
+            return ({"status": "error",
+                     "error": "metadata semantic checks failed (GC-2026-1112-06): "
+                              + "; ".join(meta_errors),
+                     "stage": "pre-build", "metadata_errors": meta_errors}, 2)
         assembly_path = temp_build_dir / "assembled.md"
         try:
             assembly_record = metalayout.assemble_document(
@@ -2981,8 +3052,11 @@ def _cmd_build_docx_impl(args) -> tuple:
         layout_notes.append({"check": "svg_alternatives_stripped", "value": svg_stripped})
 
         # ── content-compliance assertion: equations must be OMML, not images (S9) ──
-        source_text = src_text
-        math_markers = len(re.findall(r'\$[^$\n]+\$', source_text)) + len(re.findall(r'\$\$.+?\$\$', source_text, re.S))
+        # GC-2026-1112-06 终审返工（P3-7）：公式计数只统计正文区间（body/paper.md），
+        # 不把生成的前端/文末计入——摘要等元数据块若含行内公式（$…$）曾造成
+        # `formulas_omml` 误失败（math_markers>0 而 omath_count 按全文档计）。
+        body_text = body_source.read_text(encoding="utf-8")
+        math_markers = len(re.findall(r'\$[^$\n]+\$', body_text)) + len(re.findall(r'\$\$.+?\$\$', body_text, re.S))
         omath_count = next((n["value"] for n in layout_notes if n["check"] == "omath_count"), 0)
         math_issue = None
         if math_markers > 0 and omath_count == 0:

@@ -173,13 +173,16 @@ author_bio_layout:                      # [S17] 全员作者简介（内容字�
 #   优先，本文档落地为上标编号式（affiliation_style: numbered_superscript）；
 #   writing-spec 的 S2 原文保留不删（作为期刊明示原文登记，供编辑部核实时引用）。
 authors:
-  affiliation_style: numbered_superscript   # [JT] 上标编号式（S2 偏差登记见上方注释块）
+  affiliation_style: numbered_superscript   # [JT] 上标编号式（S2 偏差登记见上方注释块）。
+                                           # 声明键（终审返工 P2-3）：生成器当前实作 numbered_superscript
+                                           # 范本形态，inline_parenthesized 需生成器开发（非活开关）
   corresponding_mark: "*"                   # [S18] 通信作者姓名右上角上标星号
   corresponding_mark_position: after_numbers  # [JT] 范本上标「1,2,*」星号置于单位编号之后
   name_separator_zh: "，"                   # [JT] 中文署名作者间全角逗号（张汉宁，勾善文，…）
   name_separator_en: ", "                   # [JT] 英文署名作者间半角逗号+空格（ZHANG Hanning, GOU Shanwen, …）
   number_separator: ","                     # [JT] 单位编号之间半角逗号（1,2,*）
   affiliation_list_alignment: center        # [JT] 中/英单位行均居中（长列表折行仍居中）
+                                           # 声明键（终审返工 P2-3）：生成器当前实作 center，切换需生成器开发
   front_order:                              # [JT] 首页自上而下顺序（extract-report §2 逐行实录）
     - title_zh                             #   1 中文标题
     - authors_zh                           #   2 中文署名（含上标）
@@ -194,11 +197,15 @@ authors:
     - keywords_en                          #  11 英文 Keywords
   front_corresponding_line: false          # [JT]+用户裁定：首页无独立通信作者行；通信信息只以
                                            #   署名上标 *（corresponding_mark）+ 文末「通信作者*」段承载
+                                           # 声明键（终审返工 P2-3）：生成器当前实作 false，
+                                           # true（前端通信行）需生成器开发
   funding_positions: [front, back]         # [JT] 基金项目重复登出两处：首页（关键词后）+ 文末
                                            #   作者信息节首段（写法略异，范文实证）
   bio_section:                             # [S17]+[JT]
     heading: 作者信息                       # [JT] 文末节标题（宋体、无编号、顶格）
     position: after_references             # [JT] 位于参考文献之后
+                                           # 声明键（终审返工 P2-3）：生成器当前实作
+                                           # after_references，切换需生成器开发
     paragraph_labels:                      # [JT] 四段依次；标签后接全角冒号「：」由生成器拼接，不硬编码进模板
       funding: 基金项目
       first_author: 作者简介
@@ -221,3 +228,12 @@ authors:
       - 性别
       - 单位
       - 从事工作
+    corresponding_bio_fields:              # [JT] 通信作者* 段范本简式八字段（终审返工 P2-4）；
+      - 出生年                              #   无籍贯/学位/职称；电子邮箱、电话在通信地址之
+      - 性别                                #   前；地址与邮编合写「通信地址：<addr>，邮政
+      - 单位                                #   编码 <pc>」。与 A13 bio_field_order（首作者
+      - 研究方向                            #   全字段）不同——通信作者不用全字段（[JT] 第
+      - 电子邮箱                            #   八段实测逐字段对齐，见 GC-2026-1112-06 终审）
+      - 电话
+      - 通信地址
+      - 邮政编码

@@ -364,7 +364,7 @@
     "authors": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Author / affiliation / attribution / bio structure (GC-2026-1112-06). Structure keys + light format parameters only; full sentence templates are assembled by the generator (tools/paper.py, phase 2) from the per-paper metadata. No font-size / font-face keys here (user ruling: no type-size changes this round). Optional: profiles without it (draft.yaml, gbt7713-2-2022.yaml) remain valid.",
+      "description": "Author / affiliation / attribution / bio structure (GC-2026-1112-06). Structure keys + light format parameters only; full sentence templates are assembled by the generator (tools/metalayout.py, phase 2) from the per-paper metadata. No font-size / font-face keys here (user ruling: no type-size changes this round). Optional: profiles without it (draft.yaml, gbt7713-2-2022.yaml) remain valid.\n\nGC-2026-1112-06 final-review rework (P2-3): affiliation_style / affiliation_list_alignment / front_corresponding_line / bio_section.position are DECLARATION-ONLY keys — the generator currently implements the measured 范本 forms (numbered_superscript / center / no front corresponding line / after_references); switching them requires generator development and they are not live switches.",
       "required": [
         "affiliation_style",
         "corresponding_mark",
@@ -382,7 +382,7 @@
         "affiliation_style": {
           "type": "string",
           "enum": ["numbered_superscript", "inline_parenthesized"],
-          "description": "Affiliation reference style. numbered_superscript = superscript unit indices after author names (journal-measured template 2026-11-12; per PF-W12 this measured form takes precedence over venue S2, registered as a deviation in stie.yaml). inline_parenthesized = the written venue S2 form '作者姓名（一级单位全称 二级单位全称，所在市 邮编）', kept as the original wording."
+          "description": "Affiliation reference style. numbered_superscript = superscript unit indices after author names (journal-measured template 2026-11-12; per PF-W12 this measured form takes precedence over venue S2, registered as a deviation in stie.yaml). inline_parenthesized = the written venue S2 form '作者姓名（一级单位全称 二级单位全称，所在市 邮编）', kept as the original wording. 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements numbered_superscript; inline_parenthesized requires generator development."
         },
         "corresponding_mark": {
           "type": "string",
@@ -408,7 +408,7 @@
         "affiliation_list_alignment": {
           "type": "string",
           "enum": ["center", "left", "justify"],
-          "description": "Alignment of the affiliation-number list paragraph(s) (journal-measured: center, wraps centered)"
+          "description": "Alignment of the affiliation-number list paragraph(s) (journal-measured: center, wraps centered). 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements center; switching requires generator development."
         },
         "front_order": {
           "type": "array",
@@ -421,7 +421,7 @@
         },
         "front_corresponding_line": {
           "type": "boolean",
-          "description": "Whether the front page has a dedicated corresponding-author line. false = none; correspondence info is carried only by the byline superscript '*' plus the end-of-paper '通信作者*' entry (journal-measured + user ruling 2026-11-13)."
+          "description": "Whether the front page has a dedicated corresponding-author line. false = none; correspondence info is carried only by the byline superscript '*' plus the end-of-paper '通信作者*' entry (journal-measured + user ruling 2026-11-13). 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements false (no front corresponding line); true requires generator development."
         },
         "funding_positions": {
           "type": "array",
@@ -445,7 +445,7 @@
             "position": {
               "type": "string",
               "enum": ["after_references", "before_references"],
-              "description": "Placement of the author-info section relative to the reference list (journal-measured: after_references)"
+              "description": "Placement of the author-info section relative to the reference list (journal-measured: after_references). 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements after_references; before_references requires generator development."
             },
             "paragraph_labels": {
               "type": "object",
@@ -475,6 +475,15 @@
                 "enum": ["出生年", "性别", "单位", "从事工作"]
               },
               "description": "Reduced fields for the merged other-authors paragraph (journal-measured: birth year, gender, affiliation, work focus)"
+            },
+            "corresponding_bio_fields": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["出生年", "性别", "籍贯", "学位", "职称", "单位", "研究方向", "通信地址", "邮政编码", "电子邮箱", "电话", "从事工作"]
+              },
+              "description": "Field order of the corresponding-author simple bio (GC-2026-1112-06 final-review rework P2-4). 范本八字段简式：无籍贯/学位/职称；电子邮箱、电话在通信地址之前；地址与邮编合写「通信地址：<addr>，邮政编码 <pc>」。缺省时生成器回落 CORRESPONDING_BIO_FIELDS（同八字段）。OPTIONAL additive key — profiles without it remain valid."
             }
           }
         }

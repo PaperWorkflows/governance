@@ -56,7 +56,7 @@
 
 ### 3.3 paper.schema.json（front_notes + authors 域分工）
 
-- **`front_notes`**（新增，可选 array of string）：关键词块与基金块之间的自由说明行，渲染为 BlockText（P3 的「中图分类号：TP391」经此迁移不丢）。
+- **`front_notes`**（新增，可选 array of string）：关键词块与基金块之间的自由说明行，渲染为 BlockText（P3 的「中图分类号：P208　文献标志码：A」经此迁移不丢；终审返工 P3-3 订正：实测 P3 paper.yaml front_notes 值为「中图分类号：P208　文献标志码：A」，非初稿误记的「TP391」）。
 - **`authors` 域语义收紧（分工契约）**：paper.yaml.authors 只承载署名顺序/显示名/roles；作者身份、单位编号（affiliation_ids）、bio 全部落到 authors.yaml（author.schema.json 模型）。`affiliations` 由 required 改为 **OPTIONAL**（保留做旧显示路径兼容），`author_id` 改为与 authors.yaml 条目 `id` 联结的 join key（description 同步更正——此前注释误指 authors/registry.yaml）。
 
 ## 4. 生成器与构建接入
@@ -82,14 +82,16 @@
 
 | # | 硬闸 | 失效动作 |
 |---|---|---|
-| H1 | authors.yaml 顶层必须是容器（schema_version/affiliations/authors），**旧式裸列表直接拒绝、不回落旧路径**（load 时抛 MIGRATION_MSG） | load 失败 → 构建/check 失败 |
-| H2 | authors.yaml 过 author.schema.json（jsonschema） | load 失败 |
-| H3 | affiliations 注册表 id 重复 | validate 失败 |
-| H4 | affiliation_ids 悬空（未解析到注册表） | validate 失败 |
-| H5 | 注册表条目缺 name_en（S5 中英成对） | validate 失败 |
-| H6 | bio S17 十字段不完整 | validate 失败 |
-| H7 | paper.yaml.authors.author_id 无匹配 authors.yaml 条目；first 不为 1 个；corresponding 多于 1 个 | validate 失败 |
-| H8 | abstract.md 缺 `## 中文摘要` / `## English Abstract` 锚点 | validate 失败 |
+| H1 | authors.yaml 顶层必须是容器（schema_version/affiliations/authors），**旧式裸列表直接拒绝、不回落旧路径**（load 时抛 MIGRATION_MSG） | **load 级**（load 失败 → 构建/check 失败） |
+| H2 | authors.yaml 过 author.schema.json（jsonschema） | **load 级** |
+| H3 | affiliations 注册表 id 重复 | **语义级**（validate_metadata；check 与 build 均生效，P3-5） |
+| H4 | affiliation_ids 悬空（未解析到注册表） | **语义级** |
+| H5 | 注册表条目缺 name_en（S5 中英成对）；**署名作者缺 name_en（终审返工 P2-1）** | **语义级** |
+| H6 | bio S17 十字段不完整；**署名作者 affiliation_ids 为空（终审返工 P1-1 init 骨架闸）** | **语义级** |
+| H7 | paper.yaml.authors.author_id 无匹配 authors.yaml 条目；first 不为 1 个；corresponding 多于 1 个 | **语义级** |
+| H8 | abstract.md 缺 `## 中文摘要` / `## English Abstract` 锚点；**关键词解析为空（终审返工 P2-2）** | **语义级** |
+
+**分级说明（终审返工 P3-5 补注）**：H1/H2 为 load 级闸（`load_paper_metadata` 内置，构建/check 必经）；H3–H8 为语义硬闸（`validate_metadata`），终审返工前只在 check 生效、build 不跑——新论文 `init` 骨架（元数据未填）可通过 load 但需在 build 也失败并给可操作提示，故 `_cmd_build_docx_impl` 在装配前调用 `load_paper_metadata + validate_metadata`（终审返工 P3-5 落位，语义闸在 build 亦生效）。
 
 ### 4.4 Affiliation 样式（make_refdoc.py，阶段 4 随本变更提交）
 
@@ -112,6 +114,7 @@
 | P7 | v0.2.8 | `7e9ec4f` | `c15505396cd0395e` | `eed229579ca3bb85` | v0.2.9 | `585c8dc` | `aaf5415d4b3aa7b3` | `cc8a493d58b3e8d3` | 20 |
 
 - 共同迁移动作（P5 试点后同模式铺开）：authors.yaml 归一为容器（affiliations 注册表 + affiliation_ids + 条目级 bio 十字段）；body/paper.md 前端与文末「作者简介」节剥除（P1 48 / P2 49 / P3 43 / P4 49 / P5 56 / P6 50 / P7 44 行，均为**纯删除、零新增零修改**，中文正文逐字未动）；paper_version patch 递增；manifest `assembly.method = metadata-driven (GC-2026-1112-06)`、front/back_matter_generated=true。
+- 基金名渲染迁移（终审返工 P3-4 补记）：P1/P3 渲染基金名由手写稿前端「云南省重大科技专项计划项目」迁移为 funding.yaml 登记名「云南省时空大数据重大科技专项」（以元数据为准；同 code 202502AD080005，P1/P3 build-record 已在案）。
 - **零编造铁律**：bio 全字段与唯一信息源 authors.txt 逐字段交叉核对，两源不一致项 0；英文单位名只取各篇稿件英文单位行原文（P2 自稿 *Finance Section, Yunnan Mapping Institute*、P3 自稿等），稿件无英文单位行的篇（P1/P4/P6/P7）**沿用 P5 已登记同单位译名**并在各篇 paper.yaml.unresolved 在案「待用户复核」。
 - **harvest 计数口径**：manifest body_chars/total_chars 锚定结构标题区间，不含前端/文末——迁移后与迁移前**逐字节一致**（P5 实测 16,308 = 16,308），前端移除对计数无影响（既定行为，非回归）。
 - 收尾 city_en：英文单位行城市由中文 city 修正为拼音（昆明→Kunming），`(1. <name_en>, <city_en> <postcode>, China)` 整行无中文字符；中文单位行省份保持中文；新旧版本逐段 diff 唯一文本差异为英文行城市（n=0）；旧版 build/\<version\>/ 保留（PF-B7）。
@@ -163,13 +166,14 @@
 2. **P1/P4/P6/P7 英文单位名沿用 P5 登记译名待用户复核**：四篇稿件无英文单位行，注册表 name_en 沿用 P5 已登记同单位译名 *Land and Resources Information Center, Department of Natural Resources of Yunnan Province*；各篇 paper.yaml.unresolved 在案（owner：用户；如另给规范译名可一行回退）。P2/P3 用各自稿件英文单位行原文（P2 译名与 P5 不同，按指令勿抄）。
 3. **P2 基金名本地值**：P2 `funding.yaml` name=`云南省重大科技专项计划项目`，其余六篇为 `云南省时空大数据重大科技专项`（同 code 202502AD080005）；现渲染以各篇 funding.yaml 为准，统一命名留内容线。
 4. **四人 ORCID 待补**：七篇作者池（作者A/作者C/作者B/作者D）authors.yaml 均无 orcid 条目（模板默认 `orcid: null`），待作者自行补充。
-5. **P3 funding.yaml 属内容线存量**：P3 前端「中图分类号：TP391」已入 front_notes 未丢；P3 funding.yaml 定名与正文渲染一致性问题非本变更范围，留内容线。
+5. **P3 funding.yaml 属内容线存量**：P3 前端「中图分类号：P208　文献标志码：A」已入 front_notes 未丢（终审返工 P3-3 订正：实测 P3 paper.yaml front_notes 值为「中图分类号：P208　文献标志码：A」，非初稿误记的「TP391」）；P3 funding.yaml 定名与正文渲染一致性问题非本变更范围，留内容线。
 6. **英文块结构差异（GC-2026-1112-05 开放项延续）**：各篇英文题名/作者/单位块形态差异（P1 等）已由生成器统一起源自元数据，形态收敛不再依赖正文手写；存量的英文译名规范性与编辑部复核（开放项 2）继续挂账。
+7. **authors 域声明键登记（终审返工 P2-3，同义登记）**：`affiliation_style` / `affiliation_list_alignment` / `front_corresponding_line` / `bio_section.position` 为**声明键**——不做第二形态实现（避免无人使用的死形态），当前生成器实现范本形态（numbered_superscript / center / 无前端通信行 / after_references），切换需生成器开发。layout-profile.schema.json 的 authors 域 description 与 stie.yaml 各键注释已标同义声明（P2-3 落位）。
 
 ## 10. 回滚说明
 
 - **论文侧**：各篇「body/paper.md 剥纯正文」为**纯删除**（剥离行数见 §5，零新增零修改），按篇 `git revert <迁移提交>` 即可无损还原旧前端与文末简介；authors.yaml 容器化与 paper.yaml 变更随同提交一并回退。旧版产物仍留各篇 build/\<version\>/（PF-B7）。
-- **治理侧**：本变更文件集独立、不与他线交错（工作树基线仅他线 `authors/registry.yaml`，未触碰）；回滚 = `git revert <本变更提交>` 单笔回滚，随后重建即得旧行为。
+- **治理侧**：本变更文件集独立、不与他线交错（工作树基线仅他线 `authors/registry.yaml`，未触碰）；终审返工 P3-9 订正——本变更为**三笔提交**（`1ff3cdf` → `75be595` → `26cc802`），回滚须**按逆序** `git revert`（26cc802 → 75be595 → 1ff3cdf），**非单笔**；随后重建即得旧行为。
 - **防旧格式误构建**：生成器硬闸（H1）对旧式裸列表 authors.yaml 直接拒绝、不回落旧路径——即使回滚遗漏迁移，旧格式也不会被当前工具链静默排错。
 
 ---

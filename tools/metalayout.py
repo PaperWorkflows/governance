@@ -62,12 +62,27 @@ _EN_KW_SEP = "; "     # English keywords list (half-width semicolon + space)
 _PROJ_SEP_FRONT = "、"
 _PROJ_SEP_BACK = "；"
 
+# GC-2026-1112-06 终审返工（P2-2）：关键词锚点大小写不敏感、容忍空格变体。事故回
+# 顾：英文侧原正则 `Keywords` 大小写敏感，P3 abstract.md 原「**Key words**」不命中
+# → 首建缺失英文 Keywords 块；中文侧同时容忍 `关键词`/`关键字` 变体。
+# `Key\s*words` 同时匹配 `Keywords` 与 `Key words`（以及大小写任意组合）。
+_ZH_KW_FULL = re.compile(r"^\*{0,2}\s*关键(?:词|字)\s*\*{0,2}\s*[：:]\s*(.*)$")
+_EN_KW_FULL = re.compile(r"^\*{0,2}\s*Key\s*words\s*\*{0,2}\s*[：:]\s*(.*)$",
+                         re.IGNORECASE)
+
 # bio_field_order fallback when the profile carries none (GB/T 7713.2 + 范本 full set).
 FALLBACK_BIO_ORDER = [
     "出生年", "性别", "籍贯", "学位", "职称", "单位",
     "研究方向", "通信地址", "邮政编码", "电子邮箱", "电话",
 ]
 FALLBACK_REDUCED_ORDER = ["出生年", "性别", "单位", "从事工作"]
+
+# 通信作者* 简式八字段（范本 §8 [JT] 实测序）：无籍贯/学位/职称；电子邮箱、电话在
+# 通信地址之前；地址与邮编合写「通信地址：<addr>，邮政编码 <pc>」。stie.yaml
+# bio_section.corresponding_bio_fields 给出同序（终审返工 P2-4 落位）。
+CORRESPONDING_BIO_FIELDS = [
+    "出生年", "性别", "单位", "研究方向", "电子邮箱", "电话", "通信地址", "邮政编码",
+]
 
 
 class MetalayoutError(Exception):
@@ -277,7 +292,7 @@ def _parse_abstract(dest: Path) -> dict:
         keep: list[str] = []
         for line in sections[zh_section]:
             s = line.strip()
-            m = re.match(r"^\*{0,2}\s*关键词\s*\*{0,2}\s*[：:]\s*(.*)$", s)
+            m = _ZH_KW_FULL.match(s)
             if m:
                 keywords_zh = m.group(1).strip()
                 continue
@@ -293,7 +308,7 @@ def _parse_abstract(dest: Path) -> dict:
         seen_para = False
         for line in sections[en_section]:
             s = line.strip()
-            if re.match(r"^\*{0,2}\s*Keywords\s*\*{0,2}\s*[：:]\s*", s):
+            if _EN_KW_FULL.match(s):
                 continue  # keyword line handled below
             if not s or s.startswith("#"):
                 continue
@@ -307,7 +322,7 @@ def _parse_abstract(dest: Path) -> dict:
             keep_en.append(s)
         abstract_en = "\n\n".join(p.strip() for p in "\n".join(keep_en).split("\n\n") if p.strip())
         for line in sections[en_section]:
-            m = re.match(r"^\*{0,2}\s*Keywords\s*\*{0,2}\s*[：:]\s*(.*)$", line.strip())
+            m = _EN_KW_FULL.match(line.strip())
             if m:
                 kw_en_list = _en_kw(m.group(1).strip())
                 break
@@ -451,12 +466,53 @@ def validate_metadata(meta: dict) -> list[str]:
         errors.append(f"[{paper_id}] paper.yaml#authors.roles: at most one 'corresponding' "
                       f"author allowed; found {corrs}")
 
+    # P2-1 (终审返工): 每位署名作者必须有 name_en（S5 中英成对）。英文署名由
+    # name_en 生成，缺省时 `_byline` 英文分支会静默跳过该作者 → 英文署名少人
+    # （P3 曾因大小写关键字事故牵连此类静默问题；此处改为硬闸，缺了即失败并列人名）。
+    for a in meta.get("byline") or []:
+        if not str(a.get("name") or "").strip():
+            continue  # 无显示名（未真正署名），不计入 byline 成员
+        if a.get("author_id") in (None, ""):
+            continue
+        if not str(a.get("name_en") or "").strip():
+            errors.append(
+                f"[{paper_id}] authors.yaml#authors.{a.get('author_id')!r} "
+                f"({a.get('name')}): missing name_en (venue S5 requires the English name; "
+                f"the English byline would silently omit this author)")
+
+    # P1-1 (终审返工 — init 骨架闸): 每位署名作者必须有 ≥1 条 affiliation_ids——
+    # byline 上标编号与单位编号列表由它生成；空即渲染不出署名单位（新论文 init
+    # 骨架未填元数据时 check/build 必须点名该缺失，而非静默产出无编号署名）。
+    for a in meta.get("byline") or []:
+        if not str(a.get("name") or "").strip():
+            continue
+        if a.get("author_id") in (None, ""):
+            continue
+        if not (a.get("affiliation_numbers") or []):
+            errors.append(
+                f"[{paper_id}] authors.yaml#authors.{a.get('author_id')!r} "
+                f"({a.get('name')}): empty affiliation_ids — at least one affiliations "
+                f"registry unit is required for the byline unit numbers")
+
     # abstract.md sections
     abst = meta.get("abstract") or {}
     if not abst.get("zh_section_present"):
         errors.append(f"[{paper_id}] abstract.md: missing '## 中文摘要' section")
     if not abst.get("en_section_present"):
         errors.append(f"[{paper_id}] abstract.md: missing '## English Abstract' section")
+
+    # P2-2 (终审返工): 关键词非空闸——前端关键词块由本列表生成，解析不到即失败并
+    # 指名 abstract.md 标签问题（标签错误 = `**关键词**：…`/`**Keywords**: …` 行
+    # 缺失或错拼；中文容忍 `关键字` 变体、英文大小写不敏感且容忍 `Key words`）。
+    if not (abst.get("keywords_zh") or []):
+        errors.append(
+            f"[{paper_id}] abstract.md: 中文关键词解析为空——需要 `**关键词**：…` 行"
+            f"（或用 `关键字` 变体），请检查中文摘要节的标签与内容（P2-2）")
+    if not (abst.get("keywords_en") or []):
+        errors.append(
+            f"[{paper_id}] abstract.md: English keywords 解析为空——需要 `**Keywords**：…` "
+            f"行（大小写不敏感，容忍 `Key words` 变体），请检查 English Abstract 节的"
+            f"标签与内容（P2-2）")
 
     return errors
 
@@ -697,7 +753,9 @@ def _bio_full(author: dict, meta: dict, authors_profile: dict) -> str:
 def _bio_reduced(author: dict, meta: dict, authors_profile: dict) -> str:
     """Reduced bio for the merged 其他作者 paragraph (范本 §8: 出生年、性别、
     单位、从事工作). 从事工作 maps to bio.research_direction — author.schema.json
-    has no dedicated key (noted in the report)."""
+    has no dedicated key (noted in the report). GC-2026-1112-06 终审返工（P3-2）:
+    从事工作按范本包装为「主要从事<rd>等工作」（段内「；」接排、段末「。」由调用方
+    拼）。"""
     ap = authors_profile or {}
     order = (ap.get("bio_section", {}) or {}).get("other_author_reduced_fields") \
         or FALLBACK_REDUCED_ORDER
@@ -719,8 +777,69 @@ def _bio_reduced(author: dict, meta: dict, authors_profile: dict) -> str:
         elif field == "从事工作":
             v = bio.get("research_direction")
             if v:
-                text += f"，{v}"
+                text += f"，主要从事{v}等工作"
     return text
+
+
+def _bio_corresponding(author: dict, meta: dict, authors_profile: dict) -> str:
+    """Corresponding-author simple bio (范本 §8 简式八字段, P2-4 终审返工).
+
+    与首作者全字段（_bio_full）不同：无籍贯/学位/职称；电子邮箱、电话在通信地址
+    之前；通信地址与邮政编码合写为「通信地址：<addr>，邮政编码 <pc>」（邮政编码后
+    无冒号）。字段表由 profile bio_section.corresponding_bio_fields 给定，缺省回落
+    CORRESPONDING_BIO_FIELDS。
+    """
+    ap = authors_profile or {}
+    order = (ap.get("bio_section", {}) or {}).get("corresponding_bio_fields") \
+        or CORRESPONDING_BIO_FIELDS
+    bio = author.get("bio") or {}
+    units = _units_joined(author, meta)
+    inline: list[str] = []
+    labeled: list[str] = []
+    postcode_consumed = False
+    for field in order:
+        if field == "出生年":
+            v = bio.get("birth_year")
+            if v not in (None, ""):
+                inline.append(f"（{v} 年生）")
+        elif field == "性别":
+            v = bio.get("gender")
+            if v:
+                inline.append(f"，{v}")
+        elif field == "单位":
+            if units:
+                inline.append(f"，{units}")
+        elif field == "研究方向":
+            v = bio.get("research_direction")
+            if v:
+                labeled.append(f"研究方向为{v}")
+        elif field == "电子邮箱":
+            v = bio.get("email")
+            if v:
+                labeled.append(f"电子邮箱：{v}")
+        elif field == "电话":
+            v = bio.get("phone")
+            if v:
+                labeled.append(f"电话：{v}")
+        elif field == "通信地址":
+            addr = bio.get("address")
+            pc = bio.get("postcode")
+            segment = f"通信地址：{addr}" if addr else ""
+            if addr and pc:
+                segment += f"，邮政编码 {pc}"
+                postcode_consumed = True
+            if segment:
+                labeled.append(segment)
+        elif field == "邮政编码":
+            if postcode_consumed:
+                continue
+            pc = bio.get("postcode")
+            if pc:
+                labeled.append(f"邮政编码：{pc}")
+    text = (author.get("name") or "") + "".join(inline)
+    if labeled:
+        text += "；" + "；".join(labeled)
+    return text + "。"
 
 
 def generate_back_matter(meta: dict, authors_profile: dict) -> str:
@@ -748,9 +867,11 @@ def generate_back_matter(meta: dict, authors_profile: dict) -> str:
 
     corresponding = meta.get("corresponding_author")
     if corresponding is not None:
+        # P2-4 (终审返工): 通信作者* 段改用范本简式八字段（_bio_corresponding），
+        # 不再复用首作者全字段（_bio_full）。
         parts.append(_div("BlockText",
                           f"{labels.get('corresponding', '通信作者*')}："
-                          f"{_bio_full(corresponding, meta, ap)}"))
+                          f"{_bio_corresponding(corresponding, meta, ap)}"))
 
     others = meta.get("other_authors") or []
     if others:
