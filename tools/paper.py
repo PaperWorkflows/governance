@@ -3067,6 +3067,1073 @@ def cmd_build_debate(args):
     return emit({"status": "ok", "paper_id": info["id"], "debate_path": debate_path, "consensus_preview": str(result.get("final_consensus", {}))[:500]})
 
 
+# ── package (PF-B15/PF-B16 submission package, GC-2026-1112-03) ─────────
+
+class PackageFailure(Exception):
+    """A package failure: reported with a non-zero exit code and details.
+
+    exit_code 1 = a build/assertion failure (the paper or the package is at
+    fault); exit_code 2 = a usage or environment failure (the caller is at
+    fault) — the same split cmd_check / cmd_build_docx use.
+    """
+    def __init__(self, error: str, exit_code: int = 1, **details):
+        super().__init__(error)
+        self.payload = {"status": "error", "error": error}
+        self.payload.update(details)
+        self.exit_code = exit_code
+
+
+# Figure types that qualify for the PF-B15 bitmap downgrade. The downgrade is
+# limited to photograph-like figures; every other bitmap (or an undecidable
+# source) stays redraw_pending, because PF-B15 makes the SVG redraw a hard duty.
+PHOTO_TYPES = {"photo", "photos", "photograph", "photographs", "photography",
+               "photographic", "照片", "摄影", "写真"}
+
+FIG_STATUS_SVG = "svg_source_registered"
+FIG_STATUS_DOWNGRADE = "downgraded_bitmap"
+FIG_STATUS_REDRAW = "redraw_pending"
+
+# The counting method of record (G5/T1): a TRUE non-whitespace character
+# count, matching the P5 ruling (len(re.sub(r'\s','',text))). The older
+# _count_chinese_chars (CJK characters + whitespace-split words) is NOT used
+# here; it is kept as a sidecar reference value only.
+CHAR_COUNT_METHOD = "非空白字符（len(re.sub(r'\\s','',text))，含标点/数字/字母），与 P5 既有裁定口径一致"
+
+
+def _resolve_paper_dir(spec: str) -> Path:
+    """Resolve --paper to a paper workspace directory.
+
+    Accepts a path, a bare repository directory name, or a bare paper id
+    ('P4'). Paper workspaces live outside this repo (papers/ is gitignored).
+    """
+    if not spec:
+        raise PackageFailure("--paper required", exit_code=2)
+    cand = Path(spec).expanduser()
+    if cand.is_dir():
+        return cand.resolve()
+    papers_root = PROJECT_ROOT / "papers"
+    named = papers_root / spec
+    if named.is_dir():
+        return named.resolve()
+    if papers_root.is_dir():
+        hits = [d for d in sorted(papers_root.iterdir())
+                if d.is_dir() and (d.name == spec or d.name.startswith(spec + "-"))]
+        if len(hits) == 1:
+            return hits[0].resolve()
+        if len(hits) > 1:
+            raise PackageFailure(f"--paper {spec} is ambiguous: {[d.name for d in hits]}", exit_code=2)
+    raise PackageFailure(f"Paper directory not found: {spec}", exit_code=2)
+
+
+def _resolve_package_version(dest: Path, args) -> tuple[str, str]:
+    """Return (version, source) with source in {'cli', 'current'}."""
+    if getattr(args, "version", None) and getattr(args, "current", False):
+        raise PackageFailure("--version and --current are mutually exclusive", exit_code=2)
+    if getattr(args, "version", None):
+        return _norm_version(args.version), "cli"
+    current_file = dest / "build" / "current.json"
+    if not current_file.exists():
+        raise PackageFailure(f"build/current.json not found: {current_file} (use --version)", exit_code=2)
+    try:
+        current = json.loads(current_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PackageFailure(f"build/current.json is unreadable: {exc}", exit_code=2)
+    version = current.get("paper_version")
+    if not version:
+        raise PackageFailure("build/current.json carries no paper_version (use --version)", exit_code=2)
+    return _norm_version(str(version)), "current"
+
+
+def _count_nonwhitespace_chars(text: str) -> int:
+    """True non-whitespace character count (P5 ruling; PF-RV8 band check)."""
+    return len(re.sub(r'\s', '', text or ''))
+
+
+def _load_yaml_file(path: Path) -> object:
+    if not path.exists():
+        return {}
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise PackageFailure(f"{path} is not valid YAML: {exc}")
+
+
+def _load_yaml_mapping(path: Path) -> dict:
+    """Load a YAML file that must hold a mapping (authors.yaml, writing-spec.yaml)."""
+    data = _load_yaml_file(path)
+    return data if isinstance(data, dict) else {}
+
+
+def _markdown_sections(text: str, level: int = 1) -> tuple[list, list]:
+    """Return (sections, lines); a section is {'line': idx, 'title': str}."""
+    lines = text.splitlines()
+    pattern = re.compile(r"^" + "#" * level + r"\s+(\S.*?)\s*$")
+    sections = []
+    for idx, line in enumerate(lines):
+        m = pattern.match(line)
+        if m:
+            sections.append({"line": idx, "title": m.group(1)})
+    return sections, lines
+
+
+def _strip_pandoc_fences(text: str) -> str:
+    """Drop pandoc div fences (':::' / '::: {custom-style=...}')."""
+    kept = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s == ":::" or s.startswith("::: {"):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def _split_md_row(line: str) -> list:
+    """Split a markdown table row into cells (honours \\| escapes)."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    cells, buf, i = [], [], 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "\\" and i + 1 < len(s) and s[i + 1] == "|":
+            buf.append("|")
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    cells.append("".join(buf))
+    return [c.strip() for c in cells]
+
+
+def _is_md_separator(line: str) -> bool:
+    s = line.strip()
+    if not s.startswith("|"):
+        return False
+    cells = _split_md_row(s)
+    return bool(cells) and all(re.fullmatch(r":?-{2,}:?", c.replace(" ", "")) for c in cells)
+
+
+def _strip_markdown_bold(text: str) -> str:
+    """Remove markdown bold wrappers — formatting marker, not table data."""
+    return re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+
+
+def _package_figures(dest: Path) -> list:
+    """Figure delivery plan from figures/index.yaml.
+
+    Only the `filename_svg` field decides the delivery state (T6/G6):
+    a registered SVG is packaged as-is (no redraw diff duty — PF-B15 attaches
+    the diff duty to a redraw), a photograph-like bitmap may be downgraded
+    honestly, every other bitmap or an undecidable source stays
+    redraw_pending (PF-B15 redraw duty stays human until O6).
+    """
+    index_file = dest / "figures" / "index.yaml"
+    if not index_file.exists():
+        raise PackageFailure(f"figures/index.yaml not found: {index_file}")
+    data = _load_yaml_file(index_file)
+    entries = None
+    if isinstance(data, list):
+        entries = data
+    elif isinstance(data, dict):
+        for key in ("figures", "figs", "items"):
+            if isinstance(data.get(key), list):
+                entries = data[key]
+                break
+    if entries is None:
+        raise PackageFailure(f"figures/index.yaml carries no figure list: {index_file}")
+    plans = []
+    for i, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict):
+            continue
+        fig_id = str(entry.get("id") or f"fig{i}")
+        svg_name = str(entry.get("filename_svg") or "").strip()
+        bitmap_name = str(entry.get("filename") or entry.get("filename_png") or "").strip()
+        declared_type = entry.get("type") or entry.get("source_type")
+        plan = {"index": i, "id": fig_id, "status": None, "packaged_as": None,
+                "source": None, "reason": None, "declared_type": declared_type}
+        if svg_name:
+            svg_path = dest / "figures" / svg_name
+            if not svg_path.exists():
+                raise PackageFailure(
+                    f"figures/index.yaml registers filename_svg for {fig_id} but the file is missing: {svg_path}",
+                    figure=fig_id, filename_svg=svg_name)
+            plan["status"] = FIG_STATUS_SVG
+            plan["packaged_as"] = f"figures/fig{i}.svg"
+            plan["source"] = svg_path
+            plan["reason"] = "SVG source registered — packaged as-is (same source, no redraw diff duty)"
+        elif str(declared_type or "").strip().lower() in PHOTO_TYPES:
+            if not bitmap_name:
+                raise PackageFailure(
+                    f"figures/index.yaml marks {fig_id} as photograph-like but registers no bitmap file name",
+                    figure=fig_id)
+            bmp_path = dest / "figures" / bitmap_name
+            if not bmp_path.exists():
+                raise PackageFailure(
+                    f"figures/index.yaml marks {fig_id} as photograph-like but the bitmap file is missing: {bmp_path}",
+                    figure=fig_id, filename=bitmap_name)
+            plan["status"] = FIG_STATUS_DOWNGRADE
+            plan["packaged_as"] = f"figures/fig{i}.png"
+            plan["source"] = bmp_path
+            plan["reason"] = (f"photograph-like figure (type={declared_type}) — PF-B15 allows an honest "
+                              f"bitmap downgrade with the reason recorded")
+        else:
+            plan["status"] = FIG_STATUS_REDRAW
+            plan["reason"] = (f"no filename_svg registered; source type '{declared_type or 'undeclared'}' is not "
+                              f"photograph-like — PF-B15 requires an SVG redraw (human duty until O6)")
+        plans.append(plan)
+    return plans
+
+
+def _package_tables(dest: Path) -> list:
+    """Table plan from body/paper.md (the single authoritative body source).
+
+    Pipe tables are enumerated in document order; each block is paired with
+    the nearest preceding caption '表 N' (a caption div wins over a plain
+    short line, an in-text reference such as '表 3 报告了…' is not a caption).
+    A block without a caption is numbered by sequence (PF-B2 / PF-B15).
+    """
+    body_file = dest / "body" / "paper.md"
+    if not body_file.exists():
+        raise PackageFailure("single body source missing: body/paper.md (PF-B2)")
+    lines = body_file.read_text(encoding="utf-8").splitlines()
+
+    blocks = []
+    i = 0
+    while i < len(lines) - 1:
+        if lines[i].strip().startswith("|") and _is_md_separator(lines[i + 1]):
+            j = i + 2
+            while j < len(lines) and lines[j].strip().startswith("|"):
+                j += 1
+            blocks.append({"start": i, "end": j})
+            i = j
+            continue
+        i += 1
+
+    captions = []
+    in_caption_div = False
+    for idx, line in enumerate(lines):
+        m = re.match(r"^:::\s*\{([^}]*)\}\s*$", line)
+        if m:
+            in_caption_div = "table caption" in m.group(1).lower()
+            continue
+        if line.strip() == ":::":
+            in_caption_div = False
+            continue
+        cm = re.match(r"^\s*表\s*(\d+)\s*(.*)$", line)
+        if cm:
+            stripped = line.strip()
+            captions.append({
+                "line": idx,
+                "number": int(cm.group(1)),
+                "text": stripped,
+                "strong": in_caption_div,
+                "weak": (not stripped.endswith("。")) and len(stripped) <= 60,
+            })
+
+    tables = []
+    for bi, block in enumerate(blocks):
+        floor = blocks[bi - 1]["start"] if bi else 0
+        limit = max(floor, block["start"] - 40)
+        in_window = [c for c in captions if limit <= c["line"] < block["start"]]
+        strong = [c for c in in_window if c["strong"]]
+        weak = [c for c in in_window if c["weak"]]
+        picked = None
+        if strong:
+            picked = max(strong, key=lambda c: c["line"])
+        elif weak:
+            picked = max(weak, key=lambda c: c["line"])
+        header = _split_md_row(lines[block["start"]])
+        rows = []
+        for r in range(block["start"] + 2, block["end"]):
+            cells = _split_md_row(lines[r])
+            if len(cells) != len(header):
+                raise PackageFailure(
+                    f"markdown table parse failed at body/paper.md:{r + 1} — "
+                    f"{len(cells)} cells against a {len(header)}-column header",
+                    line=r + 1, table_start_line=block["start"] + 1)
+            rows.append(cells)
+        tables.append({
+            "number": picked["number"] if picked else None,
+            "caption": picked["text"] if picked else None,
+            "header": header,
+            "rows": rows,
+            "source_line": block["start"] + 1,
+        })
+
+    used = set()
+    for t in tables:
+        if t["number"] is not None:
+            if t["number"] in used:
+                raise PackageFailure(
+                    f"duplicate table number 表 {t['number']} in body/paper.md "
+                    f"(captions must be unique)", line=t["source_line"])
+            used.add(t["number"])
+    nxt = 1
+    for t in tables:
+        if t["number"] is not None:
+            continue
+        while nxt in used:
+            nxt += 1
+        t["number"] = nxt
+        used.add(nxt)
+    for t in tables:
+        t["packaged_as"] = f"tables/tab{t['number']}.csv"
+    return tables
+
+
+def _package_body(dest: Path, spec: dict) -> dict:
+    """Body ranges and the conclusion text of body/paper.md."""
+    body_file = dest / "body" / "paper.md"
+    if not body_file.exists():
+        raise PackageFailure("single body source missing: body/paper.md (PF-B2)")
+    text = body_file.read_text(encoding="utf-8")
+    sections, lines = _markdown_sections(text, 1)
+    heading = str(spec.get("conclusion_heading") or "").strip()
+    if not heading:
+        raise PackageFailure(
+            "writing-spec.yaml carries no conclusion_heading — the conclusion anchor is required (S12)",
+            conclusion_heading=None)
+    hit = next((s for s in sections if heading in s["title"]), None)
+    if hit is None:
+        raise PackageFailure(
+            f"conclusion heading not found in body/paper.md: "
+            f"writing-spec.conclusion_heading='{heading}' (S12 — the body conclusion heading must align "
+            f"with the writing spec; the review line adjudicates the content level)",
+            conclusion_heading=heading,
+            h1_titles=[s["title"] for s in sections])
+    conclusion_end = len(lines)
+    for s in sections:
+        if s["line"] > hit["line"]:
+            conclusion_end = s["line"]
+            break
+    conclusion = _strip_pandoc_fences("\n".join(lines[hit["line"]:conclusion_end])).strip()
+    start = None
+    for s in sections:
+        if re.match(r"^\d+[\s.、]", s["title"]):
+            start = s["line"]
+            break
+    if start is None:
+        raise PackageFailure(
+            "body/paper.md carries no numbered chapter heading ('# 1 …') — the body range cannot be located")
+    body_text = "\n".join(lines[start:conclusion_end])
+    ref_start = ref_end = None
+    for s in sections:
+        if "参考文献" in s["title"]:
+            ref_start = s["line"]
+            for t in sections:
+                if t["line"] > ref_start:
+                    ref_end = t["line"]
+                    break
+            break
+    ref_text = ""
+    if ref_start is not None:
+        ref_text = "\n".join(lines[ref_start:(ref_end if ref_end is not None else len(lines))])
+    return {
+        "body_text": body_text,
+        "conclusion": conclusion,
+        "references_text": ref_text,
+        "body_range": [start + 1, conclusion_end],
+        "conclusion_range": [hit["line"] + 1, conclusion_end],
+        "references_range": [ref_start + 1, ref_end] if ref_start is not None else None,
+    }
+
+
+def _extract_abstract(dest: Path, spec: dict) -> tuple[str, list, bool, list]:
+    """(zh abstract text, keywords, english abstract present, field errors)."""
+    path = dest / "abstract.md"
+    if not path.exists():
+        raise PackageFailure(f"abstract.md not found: {path}")
+    text = path.read_text(encoding="utf-8")
+    sections, lines = _markdown_sections(text, 2)
+    zh = next((s for s in sections if "中文摘要" in s["title"]), None)
+    if zh is None:
+        zh = next((s for s in sections if "摘要" in s["title"]), None)
+    errors = []
+    abstract_text = ""
+    keywords = []
+    if zh is None:
+        errors.append("abstract_zh: no '## 中文摘要' section in abstract.md")
+    else:
+        end = len(lines)
+        for s in sections:
+            if s["line"] > zh["line"]:
+                end = s["line"]
+                break
+        body_lines = lines[zh["line"] + 1:end]
+        sep = str(spec.get("keywords_separator") or "；")
+        kw_line = None
+        keep = []
+        for line in body_lines:
+            if re.match(r"^\s*\**\s*(关键词|Keywords)\s*\**\s*[：:]", line):
+                kw_line = line
+                continue
+            keep.append(line)
+        abstract_text = "\n".join(keep).strip()
+        if kw_line is None:
+            errors.append("keywords_zh: no '关键词：' line in the Chinese abstract section")
+        else:
+            raw = re.sub(r"^\s*\**\s*(关键词|Keywords)\s*\**\s*[：:]\s*", "", kw_line).strip()
+            parts = [p.strip() for p in raw.split(sep)] if sep in raw else [p.strip() for p in raw.split("；")]
+            keywords = [p for p in parts if p]
+            if not keywords:
+                errors.append("keywords_zh: the keyword line parsed to an empty list")
+    en_present = bool(re.search(r"^#{1,6}\s+.*english.*abstract", text, re.IGNORECASE | re.MULTILINE)) \
+        or bool(re.search(r"\*{0,2}Keywords\*{0,2}\s*[：:]", text))
+    return abstract_text, keywords, en_present, errors
+
+
+def _label_value(text: str, *labels: str):
+    for lab in labels:
+        m = re.search(re.escape(lab) + r"\s*[：:]\s*([^。；;\n]+)", text)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _parse_bio_paragraph(text: str) -> dict:
+    """Best-effort parse of one author biography paragraph (ten fields)."""
+    head = re.match(
+        r"^\s*([^\s，,（(]{2,12})\s*[，,]\s*(\d{4})\s*[—\-–~至]*\s*[，,]\s*([男女])\s*[，,]\s*"
+        r"([^，,]{2,15}?人)\s*[，,]\s*([^，,。]{2,12}?)\s*[，,]\s*([^，,。]{2,14})", text)
+    alt = re.match(r"^\s*([^\s，,（(]{2,12})\s*[（(]\s*(\d{4})\s*[—\-–~至]*\s*[）)]", text)
+    if head:
+        name, birth, gender, origin, degree, title = head.groups()
+    elif alt:
+        name, birth = alt.group(1), alt.group(2)
+        gender = origin = degree = title = None
+    else:
+        return {}
+    fields = {
+        "出生年": birth,
+        "性别": gender,
+        "籍贯": origin[:-1] if origin else None,
+        "学位": degree,
+        "职称": title,
+        "研究方向": _label_value(text, "研究方向"),
+        "通信地址": _label_value(text, "通信地址"),
+        "邮政编码": _label_value(text, "邮编", "邮政编码"),
+        "电子邮箱": _label_value(text, "电子邮箱"),
+        "电话": _label_value(text, "电话"),
+    }
+    missing = [k for k, v in fields.items() if not v]
+    return {"name": name, "fields": fields, "missing": missing}
+
+
+def _parse_author_bios(dest: Path) -> dict:
+    """Structured biographies parsed from body/paper.md#作者简介 (O4 source)."""
+    body_file = dest / "body" / "paper.md"
+    if not body_file.exists():
+        return {}
+    text = body_file.read_text(encoding="utf-8")
+    sections, lines = _markdown_sections(text, 1)
+    sec = next((s for s in sections if "作者简介" in s["title"]), None)
+    if sec is None:
+        return {}
+    end = len(lines)
+    for s in sections:
+        if s["line"] > sec["line"]:
+            end = s["line"]
+            break
+    raw = _strip_pandoc_fences("\n".join(lines[sec["line"]:end]))
+    bios = {}
+    for para in re.split(r"\n\s*\n", raw):
+        para = para.strip()
+        if not para:
+            continue
+        bio = _parse_bio_paragraph(para)
+        if bio:
+            bios[bio["name"]] = bio
+    return bios
+
+
+def _package_authors(dest: Path, paper_cfg: dict) -> tuple[list, dict, list]:
+    """Authors (name/affiliations/roles/email/corresponding/bio) + bio source."""
+    authors = paper_cfg.get("authors") or []
+    if not authors:
+        authors = _load_yaml_mapping(dest / "authors.yaml").get("authors") or []
+    bios = _parse_author_bios(dest)
+    entries = []
+    gaps = []
+    for a in authors:
+        if not isinstance(a, dict):
+            continue
+        roles = list(a.get("roles") or [])
+        name = a.get("name")
+        bio = bios.get(name)
+        if bio is None:
+            gaps.append({
+                "kind": "author_bio_missing",
+                "author": name,
+                "detail": "no parsable biography for this author (body/paper.md#作者简介 has no matching paragraph)",
+                "open_item": "O4",
+            })
+        elif bio["missing"]:
+            gaps.append({
+                "kind": "author_bio_incomplete",
+                "author": name,
+                "missing_fields": bio["missing"],
+                "detail": "biography parsed but some of the ten fields are absent",
+                "open_item": "O4",
+            })
+        entries.append({
+            "name": name,
+            "affiliations": list(a.get("affiliations") or []),
+            "roles": roles,
+            "email": a.get("email"),
+            "corresponding": bool(a.get("corresponding")) or ("corresponding" in roles),
+            "bio": bio["fields"] if bio else None,
+        })
+    return entries, bios, gaps
+
+
+def _package_direction(spec: dict) -> tuple[str | None, dict, list, list]:
+    """Submission direction + the verbatim-list membership check."""
+    gaps, notes = [], []
+    raw = spec.get("submission_direction")
+    direction = raw.strip() if isinstance(raw, str) and raw.strip() else None
+    cfp = spec.get("cfp_directions")
+    candidates = []
+    if isinstance(cfp, dict):
+        for key in ("columns", "special_issue_directions", "long_term_scope"):
+            value = cfp.get(key)
+            if isinstance(value, list):
+                candidates += [str(x).strip() for x in value if str(x).strip()]
+        if cfp.get("special_issue_theme"):
+            candidates.append(str(cfp["special_issue_theme"]).strip())
+    elif isinstance(cfp, list):
+        candidates += [str(x).strip() for x in cfp if str(x).strip()]
+    check = {"registered_items": len(candidates), "matched_item": None, "exact": False}
+    if direction is None:
+        gaps.append({
+            "kind": "submission_direction_missing",
+            "detail": "writing-spec.yaml carries no submission_direction (PF-B16 allows null + a logged gap)",
+        })
+        return None, check, gaps, notes
+    matched = next((c for c in candidates if c and (direction == c or c in direction)), None)
+    if matched is None:
+        gaps.append({
+            "kind": "submission_direction_not_verbatim_item",
+            "detail": "submission_direction quotes no verbatim item of writing-spec.cfp_directions "
+                      "(PF-B16 forbids self-invented directions)",
+            "value": direction,
+        })
+    else:
+        check["matched_item"] = matched
+        check["exact"] = (direction == matched)
+        if not check["exact"]:
+            notes.append({
+                "kind": "submission_direction_carries_annotation",
+                "detail": "the registered direction quotes a verbatim list item plus a pending annotation",
+                "matched_item": matched,
+            })
+    return direction, check, gaps, notes
+
+
+def _find_release_artifact(build_dir: Path, suffix: str, preferred_stem: str) -> Path:
+    candidates = sorted(p for p in build_dir.glob(f"*{suffix}") if p.is_file())
+    if not candidates:
+        raise PackageFailure(f"no {suffix} artifact in {build_dir} (build the release first)")
+    if f"{preferred_stem}{suffix}" in [c.name for c in candidates]:
+        return build_dir / f"{preferred_stem}{suffix}"
+    if len(candidates) == 1:
+        return candidates[0]
+    raise PackageFailure(f"ambiguous {suffix} artifacts in {build_dir}: {[c.name for c in candidates]}")
+
+
+def _package_plan(dest: Path, version: str) -> dict:
+    """Compute the whole package plan (expected skeleton + manifest content)."""
+    try:
+        paper_cfg = _load_paper_yaml(dest)
+    except Exception as exc:
+        raise PackageFailure(f"paper.yaml is unreadable: {exc}")
+    if not paper_cfg:
+        raise PackageFailure(f"paper.yaml not found or empty: {dest / 'paper.yaml'}")
+    spec = _load_yaml_mapping(dest / "writing-spec.yaml")
+
+    title = str(paper_cfg.get("title") or "").strip()
+    if not title:
+        raise PackageFailure("paper.yaml carries no title")
+    first_author = None
+    for a in paper_cfg.get("authors") or []:
+        if isinstance(a, dict) and "first" in (a.get("roles") or []):
+            first_author = a.get("name")
+            break
+    if not first_author:
+        for a in (_load_yaml_mapping(dest / "authors.yaml").get("authors") or []):
+            if isinstance(a, dict) and "first" in (a.get("roles") or []):
+                first_author = a.get("name")
+                break
+    if not first_author:
+        raise PackageFailure("no first author found — paper.yaml/authors.yaml must register roles containing 'first'")
+    stem = _posix_safe_title(f"{title}（{first_author}）")
+
+    build_dir = dest / "build" / version
+    if not build_dir.is_dir():
+        raise PackageFailure(f"build directory not found: {build_dir}")
+    docx_source = _find_release_artifact(build_dir, ".docx", stem)
+    pdf_source = _find_release_artifact(build_dir, ".pdf", stem)
+
+    release_manifest_path = build_dir / "manifest.json"
+    if not release_manifest_path.exists():
+        raise PackageFailure(f"release manifest not found: {release_manifest_path}")
+    try:
+        release_manifest = json.loads(release_manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PackageFailure(f"release manifest is unreadable: {exc}")
+
+    body = _package_body(dest, spec)
+    abstract_zh, keywords, abstract_en_present, field_errors = _extract_abstract(dest, spec)
+    authors, bios, bio_gaps = _package_authors(dest, paper_cfg)
+    direction, direction_check, direction_gaps, direction_notes = _package_direction(spec)
+    figures = _package_figures(dest)
+    tables = _package_tables(dest)
+
+    body_chars = _count_nonwhitespace_chars(body["body_text"])
+    refs_chars = _count_nonwhitespace_chars(body["references_text"])
+    abstract_chars = _count_nonwhitespace_chars(abstract_zh)
+    total_chars = abstract_chars + body_chars + refs_chars
+
+    gaps = list(bio_gaps) + list(direction_gaps)
+    notes = list(direction_notes)
+    if not authors:
+        field_errors.append("authors: no author registered")
+    if not abstract_zh:
+        field_errors.append("abstract_zh: empty Chinese abstract")
+    if body_chars <= 0:
+        field_errors.append("body_chars: the body range is empty")
+    if total_chars <= 0:
+        field_errors.append("total_chars: the counted text is empty")
+
+    downgrades = []
+    redraw_pending = []
+    for f in figures:
+        if f["status"] == FIG_STATUS_DOWNGRADE:
+            downgrades.append({
+                "figure": f["id"],
+                "packaged_as": f["packaged_as"],
+                "reason_category": "photograph_like",
+                "reason": f["reason"],
+                "source": str(f["source"].relative_to(dest)) if f["source"] else None,
+                "source_sha256": hashlib.sha256(f["source"].read_bytes()).hexdigest() if f["source"] else None,
+            })
+        elif f["status"] == FIG_STATUS_REDRAW:
+            redraw_pending.append({
+                "figure": f["id"],
+                "packaged_as": None,
+                "reason": f["reason"],
+                "declared_type": f["declared_type"],
+                "source": str(f["source"].relative_to(dest)) if f["source"] else None,
+            })
+            gaps.append({
+                "kind": "figure_redraw_pending",
+                "figure": f["id"],
+                "detail": f["reason"],
+                "open_item": "O6",
+            })
+
+    min_chars = spec.get("min_chars")
+    max_chars = spec.get("max_chars")
+    bandwidth = {"min_chars": min_chars, "max_chars": max_chars, "body_chars": body_chars, "level": "INFO"}
+    if isinstance(min_chars, int) and body_chars < min_chars:
+        bandwidth["status"] = "below_min"
+    elif isinstance(max_chars, int) and body_chars > max_chars:
+        bandwidth["status"] = "above_max"
+    else:
+        bandwidth["status"] = "in_band"
+
+    manifest = {
+        "package_version": version,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "title": title,
+        "title_en": paper_cfg.get("title_en"),
+        "abstract_zh": abstract_zh,
+        "abstract_en_present": abstract_en_present,
+        "keywords_zh": keywords,
+        "authors": authors,
+        "conclusion": body["conclusion"],
+        "total_chars": total_chars,
+        "body_chars": body_chars,
+        "submission_direction": direction,
+        "char_count_methodology": CHAR_COUNT_METHOD,
+        "char_count_components": {
+            "abstract_zh": abstract_chars,
+            "body": body_chars,
+            "references": refs_chars,
+            "total": total_chars,
+        },
+        "figures": {
+            "count": len(figures),
+            "items": [{"id": f["id"], "packaged_as": f["packaged_as"], "status": f["status"]} for f in figures],
+        },
+        "tables": {
+            "count": len(tables),
+            "items": [{"number": t["number"], "packaged_as": t["packaged_as"], "caption": t["caption"]} for t in tables],
+        },
+        "downgrades": [
+            {"figure": d["figure"], "packaged_as": d["packaged_as"],
+             "reason_category": d["reason_category"], "reason": d["reason"]}
+            for d in downgrades
+        ],
+    }
+
+    sidecar = {
+        "paper_id": dest.name,
+        "paper_version": version,
+        "generated_at": manifest["generated_at"],
+        "gaps": gaps,
+        "downgrades": downgrades,
+        "redraw_pending": redraw_pending,
+        "notes": notes,
+        "field_errors": field_errors,
+        "char_count_bandwidth": bandwidth,
+        "char_count_reference": {
+            "method": "_count_chinese_chars (CJK characters + whitespace-split words) — writing-status legacy metric",
+            "body": _count_chinese_chars(body["body_text"]),
+            "references": _count_chinese_chars(body["references_text"]),
+            "abstract_zh": _count_chinese_chars(abstract_zh),
+            "total": _count_chinese_chars(body["body_text"]) + _count_chinese_chars(body["references_text"])
+                     + _count_chinese_chars(abstract_zh),
+        },
+        "char_count_methodology": CHAR_COUNT_METHOD,
+        "source_manifest": {
+            "path": str(release_manifest_path.relative_to(dest)),
+            "release_id": release_manifest.get("release_id"),
+            "paper_title": release_manifest.get("paper_title"),
+            "paper_version": release_manifest.get("paper_version"),
+        },
+        "author_bio_source": "body/paper.md#作者简介" if bios else None,
+        "tables_source": [
+            {"number": t["number"], "caption": t["caption"], "source_location": f"body/paper.md:{t['source_line']}"}
+            for t in tables
+        ],
+    }
+
+    return {
+        "version": version,
+        "stem": stem,
+        "docx_name": f"{stem}.docx",
+        "pdf_name": f"{stem}.pdf",
+        "docx_source": docx_source,
+        "pdf_source": pdf_source,
+        "build_dir": build_dir,
+        "package_dir": build_dir / "package",
+        "sidecar_path": build_dir / "package-gaps.json",
+        "release_manifest": release_manifest,
+        "figures": figures,
+        "tables": tables,
+        "manifest": manifest,
+        "sidecar": sidecar,
+        "gaps": gaps,
+        "notes": notes,
+        "field_errors": field_errors,
+        "downgrades": downgrades,
+        "redraw_pending": redraw_pending,
+        "bandwidth": bandwidth,
+        "char_counts": {
+            "total_chars": total_chars,
+            "body_chars": body_chars,
+            "abstract_zh_chars": abstract_chars,
+            "references_chars": refs_chars,
+        },
+        "body_ranges": {
+            "body": body["body_range"],
+            "conclusion": body["conclusion_range"],
+            "references": body["references_range"],
+        },
+    }
+
+
+def _materialize_package(plan: dict) -> None:
+    """Rebuild the package root from scratch (PF-B16 skeleton)."""
+    import shutil
+    package_dir = plan["package_dir"]
+    resolved = package_dir.resolve()
+    if resolved.name != "package" or resolved.parent != plan["build_dir"].resolve():
+        raise PackageFailure(f"refusing to clear a non-package path: {resolved}")
+    if package_dir.exists():
+        shutil.rmtree(package_dir)
+    package_dir.mkdir(parents=True)
+    (package_dir / "figures").mkdir()
+    (package_dir / "tables").mkdir()
+    shutil.copy2(plan["docx_source"], package_dir / plan["docx_name"])
+    shutil.copy2(plan["pdf_source"], package_dir / plan["pdf_name"])
+    for f in plan["figures"]:
+        if f["status"] == FIG_STATUS_REDRAW or not f["source"]:
+            continue
+        suffix = ".png" if f["status"] == FIG_STATUS_DOWNGRADE else ".svg"
+        shutil.copy2(f["source"], package_dir / "figures" / f"fig{f['index']}{suffix}")
+    import csv
+    for t in plan["tables"]:
+        out = package_dir / "tables" / f"tab{t['number']}.csv"
+        with out.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh, lineterminator="\n")
+            writer.writerow([_strip_markdown_bold(c) for c in t["header"]])
+            for row in t["rows"]:
+                writer.writerow([_strip_markdown_bold(c) for c in row])
+    (package_dir / "manifest.json").write_text(
+        json.dumps(plan["manifest"], ensure_ascii=False, indent=2), encoding="utf-8")
+    plan["sidecar_path"].write_text(
+        json.dumps(plan["sidecar"], ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _package_assertions(plan: dict, manifest: dict) -> list:
+    """A1-A5 — the PF-B16/PF-B7 cross-checks (PF-B15/B16 enforcement point)."""
+    package_dir = plan["package_dir"]
+    results = []
+
+    missing = []
+    for rel in (plan["docx_name"], plan["pdf_name"], "manifest.json"):
+        if not (package_dir / rel).exists():
+            missing.append(rel)
+    for sub in ("figures", "tables"):
+        if not (package_dir / sub).is_dir():
+            missing.append(sub + "/")
+    results.append({"id": "A1", "name": "package skeleton complete (5 items)",
+                    "status": "pass" if not missing else "fail", "missing": missing})
+
+    empty = []
+    if not manifest.get("title"):
+        empty.append("title")
+    if not manifest.get("authors"):
+        empty.append("authors")
+    if not manifest.get("abstract_zh"):
+        empty.append("abstract_zh")
+    if not manifest.get("keywords_zh"):
+        empty.append("keywords_zh")
+    if not manifest.get("conclusion"):
+        empty.append("conclusion")
+    if not (manifest.get("body_chars") or 0) > 0:
+        empty.append("body_chars")
+    if not (manifest.get("total_chars") or 0) > 0:
+        empty.append("total_chars")
+    results.append({"id": "A2", "name": "structural manifest fields non-empty",
+                    "status": "pass" if not empty else "fail", "empty_fields": empty,
+                    "field_errors": plan.get("field_errors") or []})
+
+    release = plan["release_manifest"]
+    diffs = []
+    if str(release.get("paper_title", "")).strip() != str(manifest.get("title", "")).strip():
+        diffs.append({"field": "title", "release_manifest": release.get("paper_title"),
+                      "package_manifest": manifest.get("title")})
+    if _norm_version(str(release.get("paper_version", ""))) != _norm_version(str(manifest.get("package_version", ""))):
+        diffs.append({"field": "package_version", "release_manifest": release.get("paper_version"),
+                      "package_manifest": manifest.get("package_version")})
+    results.append({"id": "A3", "name": "shared fields identical to the release manifest",
+                    "status": "pass" if not diffs else "fail", "differences": diffs})
+
+    tables_dir = package_dir / "tables"
+    actual_csv = {p.name for p in tables_dir.glob("*.csv")} if tables_dir.is_dir() else set()
+    expected_csv = {Path(t["packaged_as"]).name for t in plan["tables"]}
+    manifest_csv = {Path(i.get("packaged_as", "")).name for i in (manifest.get("tables", {}).get("items") or [])
+                    if i.get("packaged_as")}
+    table_missing = sorted(expected_csv - actual_csv)
+    table_extra = sorted(actual_csv - expected_csv)
+    manifest_missing = sorted(expected_csv - manifest_csv)
+    table_ok = not (table_missing or table_extra or manifest_missing)
+    results.append({"id": "A4", "name": "CSV count matches the tables of body/paper.md (bidirectional)",
+                    "status": "pass" if table_ok else "fail",
+                    "expected": sorted(expected_csv), "packaged": sorted(actual_csv),
+                    "missing": table_missing, "extra": table_extra, "manifest_missing": manifest_missing})
+
+    figures_dir = package_dir / "figures"
+    actual_fig = {p.name for p in figures_dir.iterdir() if p.is_file()} if figures_dir.is_dir() else set()
+    expected_fig = {Path(f["packaged_as"]).name for f in plan["figures"] if f["packaged_as"]}
+    manifest_fig = {Path(i.get("packaged_as", "")).name for i in (manifest.get("figures", {}).get("items") or [])
+                    if i.get("packaged_as")}
+    fig_missing = sorted(expected_fig - actual_fig)
+    fig_extra = sorted(actual_fig - expected_fig)
+    manifest_fig_missing = sorted(expected_fig - manifest_fig)
+    registered_missing = [f["id"] for f in plan["figures"] if f["packaged_as"]
+                          and not (plan["package_dir"] / f["packaged_as"]).exists()]
+    fig_ok = not (fig_missing or fig_extra or manifest_fig_missing or registered_missing)
+    results.append({"id": "A5", "name": "figure set identical to figures/index.yaml (bidirectional)",
+                    "status": "pass" if fig_ok else "fail",
+                    "expected": sorted(expected_fig), "packaged": sorted(actual_fig),
+                    "missing": fig_missing, "extra": fig_extra,
+                    "manifest_missing": manifest_fig_missing, "registered_but_absent": registered_missing})
+    return results
+
+
+def _append_build_record(dest: Path, payload: dict, plan: dict | None) -> None:
+    """Append the build-record section (PF-B7 ledger; append-only)."""
+    record = dest / "build-record.md"
+    version = payload.get("paper_version") or (plan or {}).get("version") or "?"
+    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
+    lines = [f"## PKG-{version} · 投稿交付包组装（{stamp}）", ""]
+    lines.append(f"- 运行：`python3 -I tools/paper.py package --paper {payload.get('paper_dir', dest.name)}`"
+                 f"{' --verify-only' if payload.get('mode') == 'verify' else ''}"
+                 f"{' --strict' if payload.get('strict') else ''}")
+    lines.append(f"- 模式：{'校验（--verify-only，不重建）' if payload.get('mode') == 'verify' else '组装（清空重建）'}")
+    lines.append(f"- 版本：{version}；包根：`build/{version}/package/`；缺口 sidecar：`build/{version}/package-gaps.json`")
+    lines.append("")
+    status = payload.get("status")
+    lines.append("### 骨架清单")
+    lines.append("")
+    lines.append("| 项 | 文件 | 结果 |")
+    lines.append("|---|---|---|")
+    if plan:
+        lines.append(f"| docx | {plan['docx_name']} | {'ok' if (plan['package_dir'] / plan['docx_name']).exists() else '缺失'} |")
+        lines.append(f"| pdf | {plan['pdf_name']} | {'ok' if (plan['package_dir'] / plan['pdf_name']).exists() else '缺失'} |")
+        for f in plan["figures"]:
+            name = Path(f["packaged_as"]).name if f["packaged_as"] else "—"
+            lines.append(f"| 图 {f['id']} | figures/{name} | {f['status']} |")
+        for t in plan["tables"]:
+            lines.append(f"| 表 {t['number']} | {t['packaged_as']} | {t['caption'] or '（无题注，按序补配）'} |")
+    lines.append("")
+    lines.append("### 字数")
+    lines.append("")
+    lines.append("| 口径 | 值 |")
+    lines.append("|---|---|")
+    counts = payload.get("char_counts") or {}
+    if counts:
+        lines.append(f"| total_chars（非空白字符） | {counts.get('total_chars')} |")
+        lines.append(f"| body_chars（非空白字符） | {counts.get('body_chars')} |")
+        lines.append(f"| 摘要 / 参考文献（非空白字符） | {counts.get('abstract_zh_chars')} / {counts.get('references_chars')} |")
+        ref = (payload.get("char_count_reference") or {})
+        lines.append(f"| 旧口径参考（_count_chinese_chars） | total {ref.get('total')} / body {ref.get('body')} |")
+    bandwidth = payload.get("bandwidth") or {}
+    if bandwidth:
+        lines.append(f"| 带宽（writing-spec min/max） | {bandwidth.get('min_chars')}/{bandwidth.get('max_chars')} "
+                     f"→ {bandwidth.get('status')}（INFO 级，裁定权在 PF-RV8 审稿线） |")
+    lines.append("")
+    lines.append("### 缺口摘要")
+    lines.append("")
+    gaps = payload.get("gaps") or []
+    if gaps:
+        for g in gaps:
+            lines.append(f"- {g.get('kind')}：{g.get('detail') or g.get('figure') or ''}")
+    else:
+        lines.append("- 无缺口。")
+    downgrades = payload.get("downgrades") or []
+    for d in downgrades:
+        lines.append(f"- 降级（摄影类）：{d.get('figure')} → {d.get('packaged_as')}；{d.get('reason')}")
+    lines.append("")
+    lines.append("### 断言结论")
+    lines.append("")
+    for a in payload.get("assertions") or []:
+        detail = ""
+        if a["status"] == "fail":
+            detail = f" — {json.dumps({k: v for k, v in a.items() if k not in ('id', 'name', 'status')}, ensure_ascii=False)}"
+        lines.append(f"- {a['id']} {a['name']}：{a['status']}{detail}")
+    lines.append(f"- 结论：{'pass' if payload.get('assertions_status') == 'pass' else 'fail'}"
+                 f"；--strict：{payload.get('strict_status', 'n/a')}")
+    if payload.get("error"):
+        lines.append(f"- 失败原因：{payload['error']}")
+    if payload.get("failed_assertions"):
+        lines.append(f"- 失败断言：{', '.join(payload['failed_assertions'])}")
+    if payload.get("strict_reasons"):
+        lines.append(f"- strict 原因：{'；'.join(payload['strict_reasons'])}")
+    lines.append(f"- 本次运行：{status}（退出码 {payload.get('exit_code')}）")
+    lines.append("")
+    try:
+        if not record.exists():
+            record.write_text("# 构建记录（build-record）\n\n", encoding="utf-8")
+        with record.open("a", encoding="utf-8") as fh:
+            fh.write("\n" + "\n".join(lines) + "\n")
+    except Exception as exc:  # noqa: BLE001 - a ledger failure must not mask the result
+        payload["build_record_error"] = str(exc)
+
+
+def cmd_package(args):
+    """Assemble or verify the PF-B16 submission package (GC-2026-1112-03)."""
+    mode = "verify" if getattr(args, "verify_only", False) else "build"
+    payload = {"status": "error", "command": "package", "mode": mode,
+               "strict": bool(getattr(args, "strict", False))}
+    dest = None
+    plan = None
+    code = 2
+    try:
+        if getattr(args, "version", None) and getattr(args, "current", False):
+            raise PackageFailure("--version and --current are mutually exclusive")
+        dest = _resolve_paper_dir(args.paper)
+        version, version_source = _resolve_package_version(dest, args)
+        payload.update({"paper_id": dest.name, "paper_version": version, "version_source": version_source,
+                        "paper_dir": str(dest)})
+        plan = _package_plan(dest, version)
+        package_dir = plan["package_dir"]
+        if mode == "build":
+            _materialize_package(plan)
+            manifest = plan["manifest"]
+        else:
+            manifest_file = package_dir / "manifest.json"
+            if not manifest_file.exists():
+                raise PackageFailure(f"no package manifest to verify: {manifest_file}")
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise PackageFailure(f"package manifest is unreadable: {exc}")
+        assertions = _package_assertions(plan, manifest)
+        failed = [a for a in assertions if a["status"] == "fail"]
+        payload.update({
+            "status": "ok" if not failed else "fail",
+            "package_dir": str(package_dir),
+            "gaps_sidecar": str(plan["sidecar_path"]),
+            "assertions": assertions,
+            "assertions_status": "pass" if not failed else "fail",
+            "failed_assertions": [a["id"] for a in failed],
+            "gaps": plan["gaps"],
+            "notes": plan["notes"],
+            "downgrades": plan["downgrades"],
+            "redraw_pending": plan["redraw_pending"],
+            "char_counts": plan["char_counts"],
+            "char_count_reference": plan["sidecar"]["char_count_reference"],
+            "bandwidth": plan["bandwidth"],
+            "figures": [{"id": f["id"], "packaged_as": f["packaged_as"], "status": f["status"]} for f in plan["figures"]],
+            "tables": [{"number": t["number"], "packaged_as": t["packaged_as"], "caption": t["caption"]}
+                       for t in plan["tables"]],
+            "manifest_fields": {
+                "title": manifest.get("title"),
+                "title_en": manifest.get("title_en"),
+                "abstract_zh_chars": plan["char_counts"]["abstract_zh_chars"],
+                "abstract_en_present": manifest.get("abstract_en_present"),
+                "keywords_zh": manifest.get("keywords_zh"),
+                "authors": len(manifest.get("authors") or []),
+                "corresponding_authors": [a["name"] for a in (manifest.get("authors") or []) if a.get("corresponding")],
+                "bio_parsed": [a["name"] for a in (manifest.get("authors") or []) if a.get("bio")],
+                "conclusion_chars": _count_nonwhitespace_chars(manifest.get("conclusion") or ""),
+                "total_chars": manifest.get("total_chars"),
+                "body_chars": manifest.get("body_chars"),
+                "submission_direction": manifest.get("submission_direction"),
+                "char_count_methodology": manifest.get("char_count_methodology"),
+                "figures": manifest.get("figures", {}).get("count"),
+                "tables": manifest.get("tables", {}).get("count"),
+                "downgrades": len(manifest.get("downgrades") or []),
+            },
+        })
+        code = 0 if not failed else 1
+        if getattr(args, "strict", False):
+            strict_reasons = []
+            if plan["gaps"]:
+                strict_reasons.append(f"{len(plan['gaps'])} gap(s) recorded in {plan['sidecar_path'].name}")
+            if plan["redraw_pending"]:
+                strict_reasons.append(f"{len(plan['redraw_pending'])} figure(s) pending SVG redraw")
+            payload["strict_reasons"] = strict_reasons
+            payload["strict_status"] = "pass" if not strict_reasons else "fail"
+            if strict_reasons:
+                payload["status"] = "fail"
+                code = 1
+        else:
+            payload["strict_status"] = "n/a"
+    except PackageFailure as exc:
+        payload.update(exc.payload)
+        payload.setdefault("stage", "package")
+        code = exc.exit_code
+    except Exception as exc:  # noqa: BLE001
+        payload.update({"status": "error", "error": str(exc), "stage": "package"})
+        code = 2
+    payload["exit_code"] = code
+    if dest is not None:
+        _append_build_record(dest, payload, plan)
+    return emit(payload, code)
+
+
 def main():
     parser = Parser(description="PaperFactory CLI")
     sub = parser.add_subparsers(dest="command")
@@ -3204,6 +4271,13 @@ def main():
     p_build_debate = p_build_sub.add_parser("debate", help="Assess build readiness via mmx/agy debate")
     p_build_debate.add_argument("--paper", required=True, help="Path to paper workspace")
 
+    p_package = sub.add_parser("package", help="Assemble or verify the PF-B16 submission package")
+    p_package.add_argument("--paper", required=True, help="Path to paper workspace (directory name or paper id accepted)")
+    p_package.add_argument("--version", default=None, help="Paper version to package, e.g. v0.3.2 (default: build/current.json)")
+    p_package.add_argument("--current", action="store_true", help="Use the version in build/current.json (default)")
+    p_package.add_argument("--verify-only", action="store_true", help="Verify an existing package without rebuilding it")
+    p_package.add_argument("--strict", action="store_true", help="Fail when the gaps sidecar is non-empty or a figure is redraw_pending")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -3247,6 +4321,7 @@ def main():
             "list": cmd_build_list,
             "debate": cmd_build_debate,
         }[args.build_command](args),
+        "package": cmd_package,
     }
     code = cmds[args.command](args)
     raise SystemExit(code)
