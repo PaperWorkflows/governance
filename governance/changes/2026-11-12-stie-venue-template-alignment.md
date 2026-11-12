@@ -140,6 +140,37 @@
 5. **通信作者署名位（用户三档规则 2026-11-12）**：7 篇实测均无单作者篇、无「通信作者=署名首位」篇，且各篇通信作者均在署名末位 → 全为第②档且已在末位、**零动作**；P3 通信作者以"（通信作者）"文本标记代替 \* 上标（S18 星号格式随正文另立）。若未来某篇出现通信作者非末位或=首位的形态，按三档规则处理。
 6. **`make_refdoc.py` self_check 死赋值（终审发现，登记不修）**：self_check 中 `footer_page_field` 先以粗粒度 `"PAGE"` 子串匹配计算，随后被 `has_exact_page_field`（精确 `w:instrText` 含 `PAGE` 字段）覆盖，前一次赋值为死赋值（结果未被使用）。不影响任何判定（最终值取精确版），属代码卫生问题；改逻辑需动 O9 在途线邻域（self_check 块），按纪律不在本变更处理，留后续清理轮次。同步事项：该处 AuthorBio 注释文字已在本轮同步至 stie.yaml 现值（见 §3 第 2 项）。
 
+## 11. 后续内容线闭环（2026-11-12 夜）
+
+内容线遗留事项按「GC-2026-1112-05 内容线闭环」清单执行，已提交于各论文仓与本治理仓，未 push。
+
+### 11.1 已关闭项
+
+1. **P6/P7 abstract.md 结构重修（对应各篇 build-record「已发现但未修」的 `## 中文摘要` 口径缺口）**：
+   两篇 `abstract.md` 由一级 `# 摘要` 改为合规范例（`# Abstract` / `## 中文摘要` / `## English Abstract`，
+   与 P4 样板一致），摘要与关键词正文逐字保留，仅改标题结构与标签格式（`**关键词：**`→`**关键词**：`、
+   `**Keywords:**`→`**Keywords**:`）。重建后两篇 manifest `submission_gaps` 均为 `[]`，
+   `abstract_zh` / `keywords_zh` / `conclusion` 全部非空，`abstract_zh_missing` / `keywords_zh_missing` /
+   `abstract_field_error` / `body_extraction_failed` 全部消失；`tools/verify_layout.py` 全量 26/26 保持。
+   P6 → v0.2.4（`body/paper.md` 未动，docx 与 v0.2.3 逐字节一致，纯提交元数据口径修复）；
+   P7 → v0.2.5。验证结论见两篇 build-record（P6 R11、P7 R7）。
+2. **P7 结论标题对齐 S12（manifest `body_extraction_failed` 根因）**：`# 7 质量评价、实施路径与结论`
+   → `# 7 质量评价与实施路径`；原 `## 结语`（二级）升格独立章 `# 8 结语`（一级），内容零改写；
+   body/ 章节文件与 README 同步（08-conclusion.md 新建、01-introduction.md 交叉引用同步），
+   paper.yaml chapters 增 8 结语。P7 v0.2.5 manifest `conclusion` 实测 = 第 8 章结语全文。
+3. **`make_refdoc.py` self_check 死赋值清理（§10 开放项 6 收口：登记不修→已清理）**：删除
+   `footer_page_field` 被精确版（`layoutlib.has_exact_page_field`）覆盖前的粗粒度 `"PAGE"` 子串死赋值
+   及其唯一下游 `footer_parts` 列表构造（只删死代码，未动任何逻辑）；py_compile 通过，
+   `--check` 3/3 in_sync，三个 refdoc（含 stie.docx）再生成后 sha256 逐字节不变
+   （stie.docx = `96b4ec2638222400`），证明确认删除未改变任何输出。
+
+### 11.2 缓行项登记（只登记不动手）
+
+1. **P1 结论标题**：`body/07-conclusion.md` 属并发精修线脏文件（该线 28 个之一），结论标题改法归该线统一处理，本线不碰。
+2. **P3 作者简介短式**：`authors.txt` 登记在案的设计形态（短式），非内容缺失，暂不追求长式统一。
+3. **P5 作者简介**：提取器 best-effort 对 custom-style 块的解析限制，非内容缺失，不在本线结构修复范围。
+4. **P1/P3 funding.yaml 定名**：两文件属并发线（P1 精修线脏文件之一），定名决策归该线。
+
 ---
 
 *GC-2026-1112-05。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B3/PF-B10/PF-B11/PF-B12/PF-B13/PF-B14；写作依据 governance/writing.md PF-W11/PF-W12；版本依据 governance/versions.md PF-V1/PF-V3；规则版本 0.3.0；前置分析 temp/template-analysis-20261112/。*

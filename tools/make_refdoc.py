@@ -884,8 +884,6 @@ def self_check(data: bytes, role: dict) -> dict:
     m = re.search(r'<w:pgMar [^>]*w:top="(\d+)"[^>]*w:bottom="(\d+)"[^>]*w:left="(\d+)"[^>]*w:right="(\d+)"', docxml)
     checks["margins_mm"] = [round(int(m.group(i)) / MM_TO_TWIPS, 1) for i in range(1, 5)] if m else None
     checks["no_blue_headings"] = not layoutlib.blue_colour_present(styles)
-    footer_parts = [n for n in names if re.match(r"word/footer\d*\.xml", n)]
-    checks["footer_page_field"] = any("PAGE" in z.read(n).decode("utf-8", "ignore") for n in footer_parts)
     tbl = style_block("Table")
     checks["table_three_line"] = layoutlib.three_line_table_ok(tbl)
     # C-1 header_fill: when the profile asks for a header-row fill, the firstRow
