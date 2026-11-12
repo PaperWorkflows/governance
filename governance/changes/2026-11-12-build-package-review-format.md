@@ -197,3 +197,16 @@ T2 实施期间实测到工作树存在**并发线 GC-2026-1112-01 的在途改�
 - 验证：grep 断言 review.md 含"13000–16000"与 [注] 注记；writing-spec.yaml python3 -I 解析且 min/max 落值正确；附录快照 sha256 复算与 impl-t2-minimax.md 登记值（9b6c95a4…）一致。
 - 边界：七篇论文 writing-spec.yaml 的传播仍属开放项 O2（论文侧独立仓，另立任务）；`stie.yaml` 无字数键，不受影响。
 - 实施：general-minimax；diff 复核：general-glm；提交：主会话按复核结论执行（hash 见 git log 同日）。
+
+---
+
+## 13. 补充 A2（2026-11-12）：七篇论文排版格式约束与投稿方向对齐（O2/O4 部分落地）
+
+- 用户指令（原文）："排版格式7篇论文都与治理能力排版要求对齐。投稿方向各论文与治理能力对齐。"
+- 基线：治理仓 `2a582e9`；七篇论文仓各自 HEAD（P1 9e73f41 / P2 99e9f79 / P3 3695a05 / P4 4925a11 / P5 a4d4091 / P6 d43a955 / P7 a20ffd7）。
+- 治理仓变更：模板 `templates/paper/writing-spec.yaml` 新增 `abstract_min_chars: 300`、`abstract_max_chars: 400`（2026-11-12 版摘要带宽）与 `cfp_directions` / `submission_direction` 键（PF-B16 清单登记点）。
+- 论文侧变更（各篇独立仓各一笔提交，仅动 `writing-spec.yaml` + `paper.yaml`）：① 字数带宽 min 13000 / max 16000（A1）；② 摘要带宽 300–400；③ author_bio_fields 字段名"邮编"→"邮政编码"（对齐 PF-RV8 附录原文）；④ 登记 cfp_directions 清单（源自征稿启事 2026-11-11 整理要点；要点全文登记于 P1–P3 notes，P4–P7 沿用同源清单并在注释中标明）+ submission_direction 逐篇匹配（P1/P2/P3 用其既记专刊方向（一）子题+栏目；P7 用其 notes 明示的（一）子题"可信数据空间的高质量数据集与跨域协同治理"并标注待作者确认；P4/P5/P6 仅登记专刊主题，方向条目（一）–（四）待作者确认）；⑤ paper.yaml rules_version 0.2.1 → 0.3.0（沿 GC-02 论文侧同步先例）。
+- 边界：P1/P2/P3/P5 他线未提交文件不触碰、不入提交；摘要带宽键不改变 PF-W11 建议性判定机制（带宽即容差带的显式化）；"字数要求：15000字左右为宜"等旧注释随对齐更新。
+- 风险与恢复：各仓单文件级变更，revert 各仓对应提交即回退；治理仓 revert A2 提交即回退模板扩键。
+- 验证：八仓 YAML 解析（python3 -I）；七篇 cfp_directions/submission_direction 逐篇与既记注记一致（不得自拟）；附录原文未动。
+- 实施：general-minimax；diff 复核：general-glm；提交：主会话按复核结论执行（hash 见各仓 git log 同日）。

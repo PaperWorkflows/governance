@@ -28,6 +28,8 @@ max_chars: 16000                 # 用户 2026-11-12 澄清：带宽上限 16000
 # ── 摘要与关键词 ──────────────────────────────────────────
 abstract_target_chars: null      # 摘要目标字数（**中文字符数**，不是英文词数）
 abstract_tolerance_pct: 10       # 容差百分比；目标刊写"左右/为宜"时按此换算
+abstract_min_chars: 300          # 摘要字数带宽下限（2026-11-12 版条款：300-400字左右为宜；A2）
+abstract_max_chars: 400          # 摘要字数带宽上限（同上；超 350 尽量压缩，无法压缩可放宽到 400）
 abstract_forbid_subjects: []     # 禁作主语的第一人称，如 [本文, 我们, 作者]
 abstract_forbid_references: false    # 摘要内禁引文献
 abstract_forbid_formulas: false      # 摘要内禁公式
@@ -62,6 +64,12 @@ references_zh_first: false       # 文后先中文后英文
 submission_package: null         # 投稿材料清单
 manuscript_types: []             # 可投稿件类型
 special_requirements: []         # 匿名/补充材料/数据声明等目标刊特有要求
+
+# —— 征稿方向（GC-2026-1112-02-A2；PF-B16：投稿方向必须引用清单原文条目，不得自拟）——
+cfp_directions: null             # 征稿方向清单（结构：columns 常设栏目 / special_issue_theme 专刊主题 /
+                                 #   special_issue_directions 专刊方向（一）–（四） / long_term_scope 长期征稿范围），
+                                 #   源自征稿启事，由各论文按其整理要点登记
+submission_direction: null       # 本稿对应清单的原文条目（未登记为 null + build-record 缺口登记）
 
 notes: |
   本文件为通用模板。投稿前须由目标刊的实际格式要求填写上方各键，并在每处注明来源
