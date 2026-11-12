@@ -51,10 +51,11 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 ### PF-B7 版本发布
 
 - Target directory: `build/<version>/`, where `<version>` is the paper's SemVer version (e.g., `v1.0.0`).
-- Filenames use the paper's Chinese full title with POSIX-safe escaping: spaces and special characters (`/ \ : * ? " < > |`) replaced with `_`; Chinese characters preserved as UTF-8.
-  Example: `基于辩论的可解释AI验证框架研究.pdf`, `基于辩论的可解释AI验证框架研究.docx`.
+- Filenames use "标题（第一作者中文名）" — the paper's Chinese full title plus the first author's Chinese name in full-width parentheses (from `paper.yaml` and `authors.yaml`) — with POSIX-safe escaping: spaces and special characters (`/ \ : * ? " < > |`) replaced with `_`; Chinese characters and full-width parentheses preserved as UTF-8.
+  Example: `基于辩论的可解释AI验证框架研究（张三）.pdf`, `基于辩论的可解释AI验证框架研究（张三）.docx`. The submission-package skeleton and its manifest are defined in PF-B16; an already-published version is never renamed in place.
 - Published versions cannot be modified in place. Old versions preserved.
 - Manifest records: paper identity, paper_version, manuscript_kind, title and authorship config, input snapshot, rules_version, toolchain version, environment, both artifact checksums, review and re-verification relationships, open limitations, timestamp.
+  The release manifest additionally records the submission metadata set of PF-B16 (abstract, keywords, authors with biographies, conclusion, total and body character counts, submission direction) together with the sha256 of the package `manifest.json`; shared fields must be identical in both manifests, else the build fails.
 - After all checks complete, atomically switch `build/current.json` within publish lock. Read first parses manifest, then reads referenced full version.
 - **产物本体不入版本库**：`build/`、`temp/`、`output/` 由论文仓 `.gitignore` 排除，docx/PDF/manifest 留在本地工作区，**不得 `git add -f`** 强行入库。
 - **入库的凭据有两份，缺一不可**：机器可读的 `build/<version>/manifest.json`（输入快照、profile 与 reference docx 的 sha256、规则版本、产物 sha256、页数）与**人可读的 `build-record.md`**（每次构建的可复现步骤、产物校验、版式决策与取舍登记、已发现但未修的问题）。前者说明"是什么"，后者说明"为什么"。
@@ -114,3 +115,31 @@ This file defines the build mode execution rules. Build mode covers: typesetting
 - Source levels: `national_standard`, `national_standard_advisory`, `industry_standard`, `venue_requirement`, `venue_advisory`, `journal_measured`, `common_practice`, `self_chosen`.
 - `self_chosen` values must never be presented to the venue, the user, or in a manifest as a venue requirement. Profile comments must mark each value with its source level.
 - Venue requirements take precedence over the national-standard fallback for the same key; the fallback applies only where the venue is silent.
+
+### PF-B15 图表交付：SVG 打包与原图对比
+
+- Build must cover **every figure** the paper depends on and produce a vector `fig{N}.svg` for the submission package (PF-B16). `N` follows the in-text figure numbering. If the source figure is already SVG it is packaged directly; if it is a bitmap (png/jpg) or a plotting-script product, it must be redrawn as SVG.
+- The SVG redraw **matches the original as closely as possible**: structure, data, annotations, and proportions follow the original; the **color scheme may be adjusted as needed**, but every adjustment is logged per figure (what changed, old/new values, reason). "Matches as closely as possible" is accepted per PF-B6: a diff record plus second-executor or source confirmation for image issues.
+- After redrawing, the SVG **must be diff-compared against the original** and the conclusion recorded (identical / list of differences) in the build's build-record.md section.
+- **Originals are preserved**: source figures under the paper's `figures/` tree must not be deleted, overwritten, or renamed. SVGs are produced into the package's own `figures/` subdirectory (inside the PF-B16 package root), **never written back into the paper source tree** — this keeps the fixed input snapshot (PF-B4) free of previous build outputs (snapshot mixing). In-package `fig{N}.svg|png` follows actual output.
+- Tables are exported one-by-one as `tables/tab{N}.csv` (`N` follows the in-text table numbering), **one file per table**, UTF-8, data identical to the body table; the export source (script or manual check record) is logged in build-record.md.
+- SVG/CSV acceptance follows PF-B6. Photograph-like figures that cannot be vector-redrawn are honestly downgraded to the original bitmap (png) with the downgrade reason noted in the manifest; **renaming a bitmap to `.svg` is forbidden**.
+- **Transitional execution**: this round does not change the build toolchain (open item O1 of GC-2026-1112-02). Until implemented, SVG redraw/diff-compare and CSV export are performed manually by the build executor, with per-figure/per-table results logged in build-record.md; once implemented they become build assertions.
+
+### PF-B16 投稿交付包骨架与 manifest 元数据
+
+- Every release (PF-B7 `build/<version>/`) also produces a **submission package** with package root `build/<version>/package/` (staging semantics per PF-B5). Skeleton:
+  ```
+  标题（第一作者中文名）.docx
+  标题（第一作者中文名）.pdf
+  figures/fig{N}.svg|png
+  tables/tab{N}.csv
+  manifest.json
+  ```
+- Filenames take the title from `paper.yaml` and the first author's Chinese name from `authors.yaml`; the full-width parentheses are literal skeleton characters; POSIX escaping per PF-B7. The directory is **zip-ready**: before sending it is packed as `标题（第一作者中文名）.zip` (venue S19); packing is a delivery step triggered by user instruction.
+- The in-package `manifest.json` is the **submission-facing manifest** with required fields: **标题** (title), **摘要** (zh abstract full text plus presence of the English abstract), **关键字** (keywords), **作者和简介** (authors with biographies, corresponding author marked), **结论** (结语 full text), **全文字数** (total character count), **正文字数** (body character count, chapter 1 through 结语), **投稿方向** (submission direction), plus the counting methodology, figure/table counts, and downgrade notes. It contains **no** internal credentials — input snapshot, toolchain, or internal limitation lists belong to the release manifest only (PF-B7). Shared fields must be identical in both manifests and are cross-checked at build time; mismatch fails the build.
+- Missing-field semantics: **structurally derivable fields** (title/abstract/keywords/authors/conclusion/both character counts) missing = build failure; the **externally dependent field** — submission direction — may be `null` when the venue's call-for-papers direction list is not registered in `writing-spec.yaml`, with the gap logged in build-record.md.
+- "投稿方向" must quote the **verbatim item** (number + original text) of the venue's call-for-papers direction list; self-invented directions are forbidden.
+- The character-count methodology (spaces / captions / references counted or not) is recorded with the values and kept consistent across reports of the same kind.
+- Package skeleton completeness is a build check: per-file existence + manifest field completeness; missing = build failure, no patching with an old package (PF-B5 semantics). **Transitional execution** same as PF-B15: until tooling exists (O1), the check is manual and logged in build-record.md.
+- **Sending** the package (email submission) is external transmission under AGENTS.md F7: never sent without an explicit user instruction; this rule governs generation and verification only.

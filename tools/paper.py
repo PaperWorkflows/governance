@@ -2860,7 +2860,7 @@ def _cmd_build_docx_impl(args) -> tuple:
             "toolchain": {"pandoc": pandoc_version},
             "layout": {
                 "profile": layout["profile_name"],
-                "rules_version": "0.2.1",
+                "rules_version": "0.3.0",
                 "merge_order": "L0(draft) -> L1(venue) -> L2(paper)",
                 "override_log": layout["override_log"],
                 "reference_doc": str(layout["refdoc_path"].relative_to(layoutlib.GOV_ROOT)),

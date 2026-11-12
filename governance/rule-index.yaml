@@ -1,5 +1,5 @@
 schema_version: 1
-rules_version: 0.2.1
+rules_version: 0.3.0
 notice: Structure parseable does not prove rules executed; current tools only check index and file structure.
 
 rules:
@@ -213,6 +213,14 @@ rules:
     file: governance/build.md
     title: Layout Value Provenance
     review_roles: [governance, R-D]
+  - id: PF-B15
+    file: governance/build.md
+    title: Figure and Table Delivery (SVG Packaging and Original Comparison)
+    review_roles: [R-D, governance]
+  - id: PF-B16
+    file: governance/build.md
+    title: Submission Package Skeleton and Manifest Metadata
+    review_roles: [R-D, governance]
 
   - id: PF-RV1
     file: governance/review.md
