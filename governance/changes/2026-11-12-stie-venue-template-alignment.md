@@ -173,4 +173,43 @@
 
 ---
 
+## 12. 范本标签接排修正（2026-11-13）
+
+用户 2026-11-13 指示：范本前端写法为「标题：内容」同行接排（范本实例：「摘要：…」「关键词：…」「Abstract: …」「Keywords: …」，标签不加粗、同正文字体字号），非“标签独立成行、内容另起”。本变更消除 7 篇 body/paper.md 前端的 `AbstractTitle` 独立标签行 + `Abstract` 内容块两段式偏差。
+
+### 12.1 修正内容
+
+**四标签合并**：将“AbstractTitle 标签行块 + Abstract 内容块”两段式合并为单块接排——“标签：内容”同一段落（标签与正文同字体字号、不加粗，与范本一致）：
+
+- 中文：「摘要：」「关键词：」（全角冒号，标签直连内容）；
+- 英文：「Abstract: 」「Keywords: 」（半角冒号+空格）；
+- 英文 Abstract 标签块若位于 `lang=en` 块外（P2/P4/P5/P6），删除该块、标签并入 `lang=en` 内 Abstract 块首；P3 的 Abstract/Key words 块在 `lang=en` 内，原位并排；P7 无 `lang=en`，直连并排。
+
+**文字规范化清单**（仅前端标签文字，正文逐字未改）：
+
+| 篇 | 规范化项 |
+|---|---|
+| P3 | 「摘  要：」→「摘要：」；「Key words:」→「Keywords:」 |
+| P6/P7 | 「关键词： 」「Keywords: 」尾随空格变体 → 并入时统一为「关键词：」「Keywords: 」 |
+| P4 | BlockText「资助：云南省时空大数据重大科技专项（202502AD080005）。」→「基金项目：……」（与范本用词及其余六篇统一；P4 writing-spec 无资助用语登记，无冲突） |
+| P2/P4/P5/P6/P7 | 前端 BlockText「*通信作者：」→「通信作者*：」（星号移至标签后，与范本一致；仅改星号位置，其余文字不动）。P7 通信作者行位于第二条 Author 块（`\*` 转义），按同规则仅移星号、转义保留；P3 以「（通信作者）」文字标记代替 \* 上标，不涉及 |
+
+铁律：摘要/关键词/英文摘要的正文文字逐字不改；仅动前端标签结构与标签文字；前端块之外不碰。
+
+### 12.2 重建与验证结论
+
+版本 patch 递增（纯版式/形式修正，科学内容零变）：P2 v0.4.6→v0.4.7、P3 v0.3.6→v0.3.7、P4 v0.3.3→v0.3.4、P5 v0.4.5→v0.4.6、P6 v0.2.4→v0.2.5、P7 v0.2.5→v0.2.6。
+
+- 6 篇（P2–P7）经治理仓 `tools/paper.py` 重建 docx+pdf，`check` 均 pass；`layout_assertions=pass`。
+- **接排落位验证（docx 解包 word/document.xml，逐篇实测）**：四标签全部以**段落前缀**形式出现（标签与正文同一 `w:p`）——「摘要：」「关键词：」「Abstract: 」「Keywords: 」各 1 段；不再存在独占一行的“摘要 / 关键词 / Abstract / Keywords”标签段（standalone 标签段计数 = 0）。
+- `tools/verify_layout.py` 全量回归：**TOTAL 26 PASS 26 FAIL 0**（保持）。输出存档 `temp/VERIFY-GC-2026-1112-05/verify-layout-full-20261113-front-inline.txt`。
+- 逐篇产物校验（docx/pdf sha256、大小、页数、manifest）见各篇 build-record.md 新增节（P2 R11 / P3 R9 / P4 R7 / P5 R8 / P6 R12 / P7 R8）。
+- **P1 暂缓（并发精修线脏文件）**：本变更动工时 `git diff body/paper.md` 前端区（约 1–60 行）存在脏 hunk（作者块补邮编、通信邮箱变更、基金行挪位、AbstractTitle/关键词/Abstract 块重组），按本线纪律“前端区也有脏 hunk 则停下汇报、不动该篇”执行。**执行期间并发精修线已将 P1 合入**（提交 `802ee42` 精修正文落地、`6f181b7` 基金条目、`072ba47` 版本记录 v0.4.3→v0.4.4 + stage→review，工作树转净），但其 `build/` 仍止于 v0.4.3、build-record 未新增 v0.4.4 重建节，版本号 v0.4.4 与本次规划目标重叠且该线注明“定稿合入后须再重建并追加登记”——P1 处于两线交接未完成态，本线不接管。P1 前端接排修正（四标签合并 + 通信作者星号移位）待与精修线版本/交接对齐后另行执行。
+
+### 12.3 abstract.md 机器锚点说明
+
+- abstract.md 的 `## 中文摘要` 机器锚点结构**保持不变**。manifest 抽取器（`tools/paper.py` submission 抽取）依赖该锚点从 abstract.md 提取中英文摘要与关键词；投稿面渲染已由 paper.md 侧修正为接排。两层格式分工明确：**abstract.md 供机器抽取（结构锚点稳定），paper.md 供投稿渲染（接排呈现）**，互不取代。
+
+---
+
 *GC-2026-1112-05。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B3/PF-B10/PF-B11/PF-B12/PF-B13/PF-B14；写作依据 governance/writing.md PF-W11/PF-W12；版本依据 governance/versions.md PF-V1/PF-V3；规则版本 0.3.0；前置分析 temp/template-analysis-20261112/。*
