@@ -6,7 +6,7 @@
 - 计划版本：**v1.1**（`temp/GC-2026-1112-03/plan.md`；v1.0 经 agent-gpt-team 与 agent-glm 并行交叉复核后修订，两份报告在 `temp/GC-2026-1112-03/`）
 - 规则依据：AGENTS.md F9/F5/F6、F7（外部传输须用户明示）；PF-B5/B6/B7/PF-B15/PF-B16（语义源）；PF-RV8（字数带宽提示）；S12（结语标题）、S17（作者简介十字段）
 - 实施编排：agent-gpt-team + agent-glm 并行复核（已完成）→ **agent-minimax 实施** → agent-glm 写后 diff 复核与沙盒实跑验证 → 主会话按复核结论提交 → agent-gpt-team 一次内容一致性检查
-- **流程状态**：**T 已实施**（实施报告 `temp/GC-2026-1112-03/impl-minimax.md`）；**提交待主会话复核后执行**
+- **流程状态**：**已提交**。治理仓提交 **`9552e7d`**（2026-11-12，恰 3 文件：tools/paper.py +1075、build.md PF-B16 过渡与执行点条款、本记录）；agent-glm 写后 diff 复核 **PASS**（verify-glm.md，沙盒独立重跑 3 项负例全部复现）；内容一致性检查 **consistent**（consistency-check-gpt-team.md）：其 C-1（本头部状态滞后）与 C-2（结语锚点实测失败集更正为 P1/P2/P7 共 3/7）由本次收口处置；C-3（02 记录 O1/O4 回填指针）已同步处理
 
 ---
 
@@ -85,7 +85,7 @@
 | 风险 | 缓解 | 恢复 |
 |---|---|---|
 | 题注与表块错配（正文引用"表 N"被当题注） | 题注优先取 `Table Caption` 围栏内的行；句内引用按"含句号或长度 > 60"排除；配不上的表按序补配；解析失败（列数不一致）即失败并给行号 | 修正解析后重跑；沙盒留痕 |
-| 结语锚点在部分论文取不到（P1"# 7 结论与后续"、P2"# 10 结论"、P5"# 结语"、P7 合章内嵌、P3"# 6  结语"） | 锚点取 `conclusion_heading` 子串匹配，允许章号与空格变体；**取不到即失败并报 writing-spec 键**，不静默降级 | 论文侧标题对齐（S12/PF-RV8 要求），另立论文侧小任务 |
+| 结语锚点在部分论文取不到（初估 P1/P2/P5/P7/P3；**实测修正：失败集为 P1/P2/P7 共 3 篇**，P3/P5 章号变体子串命中，见 §10.3） | 锚点取 `conclusion_heading` 子串匹配，允许章号与空格变体；**取不到即失败并报 writing-spec 键**，不静默降级 | 论文侧标题对齐（S12/PF-RV8 要求），另立论文侧小任务 |
 | 误把待重绘位图当摄影类放行（G1） | 降级资格收窄到 `type` 命中摄影类词表；不可判一律 `redraw_pending` 并入缺口，`--strict` 拦截 | 收紧 PHOTO_TYPES 或在 index 补 `type` |
 | 缺口随投稿 zip 外泄（G2） | 缺口一律写包外 sidecar；投稿面 manifest 无 gaps/source_manifest 字段；发送前须 `--verify-only --strict` | 删除包内残留并重跑 package |
 | 他线并发改 `tools/paper.py` | 实施前 `git diff --stat tools/paper.py` 非空即停（本次实测为空） | 主会话裁决顺序 |
@@ -163,7 +163,7 @@
 
 1. **P4 正文越上带**：按真非空白口径 **18722 > 16000**（`writing-spec.yaml` `max_chars`），sidecar 记 `above_max` / INFO 级。工具只提示不裁定——PF-RV8 的字数带宽裁定权在审稿线；由 P5 既有裁定口径（`len(re.sub(r'\s','',s))`）复算亦为同一数字，两口径不混用。
 2. **投稿方向待确认**：P4 登记值带"（方向条目（一）–（四）待作者确认后细化）"注记，工具判定为"含逐字条目 + 注记"（note，非 gap），`--strict` 不因此拦截；注记本身是 `paper.yaml` `unresolved` 已登记的待确认项。
-3. **结语锚点的论文侧对齐**：P1（`# 7 结论与后续`）、P2（`# 10 结论`）、P5（`# 结语`）、P7（合章内嵌）、P3（`# 6  结语`）按现行 writing-spec 的 `conclusion_heading: 结语` 取不到锚点，跑 `package` 会**失败并报 conclusion_heading**。这是 S12 内容级问题（PF-RV8 要求正文标题对齐），属论文侧任务，不在本变更域。
+3. **结语锚点的论文侧对齐**：实测失败集为 **P1（`# 7 结论与后续`）、P2（`# 10 结论`）、P7（合章内嵌）共 3/7**——P3（`# 6  结语`）与 P5（`# 结语`）按 `conclusion_heading: 结语` 子串匹配规则命中，跑 `package` 可正常提取。对 P1/P2/P7 跑 `package` 会在 conclusion 提取处**失败并报 conclusion_heading**，这是 S12 内容级问题（PF-RV8 要求正文标题对齐），属论文侧任务，不在本变更域。（一致性检查 C-2 实测更正：本条与 §7 风险表初稿所列五篇为实施前预估，以本条实测为准。）
 
 ### 10.4 越界自检
 
