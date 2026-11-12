@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayoutProfile",
-  "description": "Role-based layout profile (L0/L1/L2). additionalProperties: false per PF-B3. GC-2026-1111-02: extended from flat typography to a role/domain model; all pre-existing keys preserved, all new keys optional; missing role keys fall back to typography.body_pt / east_asia_font / latin_font (PF-B10).",
+  "description": "Role-based layout profile (L0/L1/L2). additionalProperties: false per PF-B3. GC-2026-1111-02: extended from flat typography to a role/domain model; all pre-existing keys preserved, all new keys optional; missing role keys fall back to typography.body_pt / east_asia_font / latin_font (PF-B10). GC-2026-1112-06: added optional authors domain (author / affiliation / attribution / bio structure); absence of authors (draft.yaml, gbt7713-2-2022.yaml) stays non-blocking for legacy profiles.",
   "type": "object",
   "additionalProperties": false,
   "required": ["profile", "kind"],
@@ -359,6 +359,125 @@
         "pt":                     { "type": "number", "exclusiveMinimum": 0 },
         "first_line_indent_chars":{ "type": "number", "minimum": 0 },
         "one_paragraph_per_author": { "type": "boolean" }
+      }
+    },
+    "authors": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Author / affiliation / attribution / bio structure (GC-2026-1112-06). Structure keys + light format parameters only; full sentence templates are assembled by the generator (tools/paper.py, phase 2) from the per-paper metadata. No font-size / font-face keys here (user ruling: no type-size changes this round). Optional: profiles without it (draft.yaml, gbt7713-2-2022.yaml) remain valid.",
+      "required": [
+        "affiliation_style",
+        "corresponding_mark",
+        "corresponding_mark_position",
+        "name_separator_zh",
+        "name_separator_en",
+        "number_separator",
+        "affiliation_list_alignment",
+        "front_order",
+        "front_corresponding_line",
+        "funding_positions",
+        "bio_section"
+      ],
+      "properties": {
+        "affiliation_style": {
+          "type": "string",
+          "enum": ["numbered_superscript", "inline_parenthesized"],
+          "description": "Affiliation reference style. numbered_superscript = superscript unit indices after author names (journal-measured template 2026-11-12; per PF-W12 this measured form takes precedence over venue S2, registered as a deviation in stie.yaml). inline_parenthesized = the written venue S2 form '作者姓名（一级单位全称 二级单位全称，所在市 邮编）', kept as the original wording."
+        },
+        "corresponding_mark": {
+          "type": "string",
+          "description": "Superscript mark after the corresponding author's name (venue S18: '*')"
+        },
+        "corresponding_mark_position": {
+          "type": "string",
+          "enum": ["after_numbers", "after_name"],
+          "description": "Position of the corresponding mark among superscripts. after_numbers = tail of the unit-number list ('1,2,*', journal-measured); after_name = directly after the name."
+        },
+        "name_separator_zh": {
+          "type": "string",
+          "description": "Separator between Chinese author names in the byline (journal-measured: full-width comma '，')"
+        },
+        "name_separator_en": {
+          "type": "string",
+          "description": "Separator between English author names in the byline (journal-measured: ', ')"
+        },
+        "number_separator": {
+          "type": "string",
+          "description": "Separator between unit numbers inside an author superscript (journal-measured: half-width comma ',')"
+        },
+        "affiliation_list_alignment": {
+          "type": "string",
+          "enum": ["center", "left", "justify"],
+          "description": "Alignment of the affiliation-number list paragraph(s) (journal-measured: center, wraps centered)"
+        },
+        "front_order": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["title_zh", "authors_zh", "affiliations_zh", "abstract", "keywords", "funding", "title_en", "authors_en", "affiliations_en", "abstract_en", "keywords_en"]
+          },
+          "description": "Front-page top-to-bottom block order (journal-measured, extract-report section 2 line-by-line record)"
+        },
+        "front_corresponding_line": {
+          "type": "boolean",
+          "description": "Whether the front page has a dedicated corresponding-author line. false = none; correspondence info is carried only by the byline superscript '*' plus the end-of-paper '通信作者*' entry (journal-measured + user ruling 2026-11-13)."
+        },
+        "funding_positions": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["front", "back"]
+          },
+          "description": "Where the funding block is rendered. front = first page (after keywords, journal-measured); back = first paragraph of the end-of-paper author-info section. Journal-measured duplication: [front, back]."
+        },
+        "bio_section": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["heading", "position", "paragraph_labels", "bio_field_order", "other_author_reduced_fields"],
+          "properties": {
+            "heading": {
+              "type": "string",
+              "description": "End-of-paper author-info section heading (journal-measured: '作者信息', unnumbered)"
+            },
+            "position": {
+              "type": "string",
+              "enum": ["after_references", "before_references"],
+              "description": "Placement of the author-info section relative to the reference list (journal-measured: after_references)"
+            },
+            "paragraph_labels": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["funding", "first_author", "corresponding", "other_authors"],
+              "properties": {
+                "funding":        { "type": "string", "description": "Label of the funding paragraph (journal-measured: '基金项目')" },
+                "first_author":   { "type": "string", "description": "Label of the first-author paragraph (journal-measured: '作者简介')" },
+                "corresponding":  { "type": "string", "description": "Label of the corresponding-author paragraph, mark included (journal-measured: '通信作者*')" },
+                "other_authors":  { "type": "string", "description": "Label of the merged other-authors paragraph (journal-measured: '其他作者')" }
+              }
+            },
+            "bio_field_order": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["出生年", "性别", "籍贯", "学位", "职称", "单位", "研究方向", "通信地址", "邮政编码", "电子邮箱", "电话", "从事工作"]
+              },
+              "description": "Field order of the full first-author bio (S17 field list plus '单位' between '职称' and '研究方向', journal-measured). '单位' is not a bio object key; the generator resolves it from affiliation_ids through the affiliations registry."
+            },
+            "other_author_reduced_fields": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["出生年", "性别", "单位", "从事工作"]
+              },
+              "description": "Reduced fields for the merged other-authors paragraph (journal-measured: birth year, gender, affiliation, work focus)"
+            }
+          }
+        }
       }
     }
   }

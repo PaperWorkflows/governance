@@ -767,14 +767,30 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
     # justify, first-line indent per profile (stie current: first_line_indent_chars=0 顶格,
     # one_paragraph_per_author=false 即首作者/通信作者各一段、其余作者合并一段；键缺省时
     # 回落默认 2 chars); created on demand because pandoc's base reference doc has no such style.
-    abl = role.get("author_bio_layout") or {}
+    apl = role.get("author_bio_layout") or {}
     styles = _ensure_style(styles, "AuthorBio", "author bio",
-                           rpr={"fonts": f["body"], "size_pt": abl.get("pt", s.get("author_bio")),
+                           rpr={"fonts": f["body"], "size_pt": apl.get("pt", s.get("author_bio")),
                                 "black": True},
                            ppr={"align": "both",
-                                "first_line_chars": abl.get("first_line_indent_chars", 2),
-                                "first_line_pt": abl.get("first_line_indent_chars", 2) * (abl.get("pt", s.get("author_bio")) or 9),
+                                "first_line_chars": apl.get("first_line_indent_chars", 2),
+                                "first_line_pt": apl.get("first_line_indent_chars", 2) * (apl.get("pt", s.get("author_bio")) or 9),
                                 "space_before_pt": 0, "space_after_pt": 3})
+
+    # Affiliation: venue role (GC-2026-1112-06) driven by the profile authors
+    # domain — profile fonts.affiliation_east_asia / latin + sizes.affiliation,
+    # falling back to the body slot when the profile states no affiliation size.
+    # Centered, NOT bold, line spacing follows the body (范本 §2 line 4/8: affiliation
+    # list centered). Generated ONLY when the profile declares the authors domain:
+    # draft/gbt7713 carry affiliation fonts but no authors domain and must remain
+    # byte-identical.
+    if "authors" in stack["merged"]:
+        aff_pt = s.get("affiliation") or body_pt
+        styles = _ensure_style(styles, "Affiliation", "affiliation",
+                               rpr={"fonts": f["affiliation"], "size_pt": aff_pt,
+                                    "bold": False, "black": True},
+                               ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
+                                    "space_before_pt": 0, "space_after_pt": 0,
+                                    "line_spacing": role["line_spacing"]})
 
     styles = _patch_style(styles, "SourceCode",
                            rpr={"fonts": (None, f["code"][1]), "size_pt": s.get("code")})

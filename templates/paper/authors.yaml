@@ -1,21 +1,52 @@
-# Per-Paper Author Registry
+# Per-Paper Author Registry — 文档级容器格式（GC-2026-1112-06）
+#
+# 顶层必须是映射（schema_version / affiliations 注册表 / authors 列表），由
+# instruction.git/schemas/author.schema.json（urn:paperfactory:author:3）校验；
+# 旧式裸列表（顶层为 `- id: ...` 数组）已作废，构建硬闸拒绝（不回落旧路径）。
+#
+# 分工（阶段 0+1 契约）：
+#   - 本文档承载  作者身份 / 单位注册表与编号 / 简介（bio）—— affiliations 注册表
+#     全文只声明一份，作者经 affiliation_ids 引用其编号；
+#   - paper.yaml 的 authors 域承载  署名顺序 / 角色（first/second/corresponding/other）
+#     与显示名，按 author_id = authors.yaml 条目的 id 联结。
+#
+# 英文名约定（范本 "SURNAME Given" 署名）：name_en 采用「姓前名后」语序（与 authors.txt
+# 唯一信息源一致），生成器将首词大写为姓——「Zhang San」→ 英文署名「ZHANG San」。
+# （修正记录：P5 试点发现阶段 2a 原契约设"末词大写为姓"（Given Surname 西语序），会把
+# 中文姓前名后的英文名末词当姓，渲染成 'San ZHANG' 反序错误——范本要求 'ZHANG San'；
+# 契约统一改为首词大写，见 instructions P5 build-record R10。）
 
-Each paper maintains its own author registry here.
-Since paper repos are private, full author details (name, affiliation, email, postal code) can be stored.
+schema_version: 1
 
-Format: list of author entries.
+affiliations:
+  # 单位注册表（全文唯一一份；条目顺序即单位编号 1、2、3…）
+  # id：注册表键，被作者 affiliation_ids 引用（^[a-z][a-z0-9_]*$）
+  # name：中文全称（一级单位全称 二级单位全称，S2）
+  # name_en：英文全称（S5 中英成对，缺失即校验失败）
+  # city / postcode：中文单位行「单位，市 邮编」；英文单位行「Unit, City Postcode, China」
+  - id: unit_one
+    name: 某某大学 某某学院
+    name_en: School of XX, Example University
+    city: 北京
+    postcode: "100000"
 
-- id: unique identifier (e.g. author_a)
-  name: Full name in native script
-  name_en: Name in English / romanized
-  affiliations:
-    - Institution name
-    - Department (optional)
-  email: Email address (optional, can be null for privacy)
-  orcid: ORCID identifier (optional)
-  postal_code: Postal code (optional, private repo only)
-  roles:
-    - first          # first author
-    # - second       # uncomment if needed
-    # - corresponding # uncomment if needed
-    # - other        # uncomment if needed
+authors:
+  # 按署名顺序排列；roles 在 paper.yaml 维护（这里不写角色）
+  - id: zhang_san
+    name: 张三
+    name_en: Zhang San           # 姓前名后（见文件头约定；首词为姓）
+    affiliation_ids:
+      - unit_one
+    bio:                        # S17 十个字段全必填（author.schema.json required）
+      birth_year: 1990          # 出生年（整数；渲染为「（1990 年生）」）
+      gender: 男                 # 性别（男/女）
+      hometown: 陕西西安          # 籍贯（渲染为「陕西西安人」）
+      degree: 工学博士             # 学位
+      title: 副研究员              # 职称
+      research_direction: 人工智能、大数据   # 研究方向（文末简介与「其他作者·从事工作」）
+      address: 北京市某某区某路1号      # 通信地址
+      postcode: "100000"        # 邮政编码
+      email: zhangsan@example.com   # 电子邮箱
+      phone: "13800000000"      # 电话（字符串，author.schema.json 约束）
+    email: zhangsan@example.com # 条目级联系邮箱（可选）；bio.email 为简介用
+    orcid: null

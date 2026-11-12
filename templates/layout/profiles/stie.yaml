@@ -24,6 +24,9 @@
 # 2026-11-12 变更说明：本档依据通过审稿范文（《基于可信数据空间的…跨域合规流通机制》v4.5(1).pdf）
 # 实测对齐（GC-2026-1112-05 前置实施；final-recommendations.md A/C 档）；字号类
 # （sizes.*、author_bio_layout.pt、页码字号等全部 pt 值）按用户裁定保持现值，本轮一律不动。
+# 2026-11-13 变更说明（GC-2026-1112-06 阶段 0+1 前置）：新增 authors 域——作者/单位/关联/简介的
+# 结构键 + 少量格式参数（不硬编码整句模板，整句由生成器阶段 2 按元数据拼接 tools/paper.py）；
+# 字号字体类一律保持现值不动（本轮只加结构与关联模式，不加字号）。
 
 # 覆写关系：本档覆盖 L0（draft）；论文 L2 只可再覆写 typography 可覆盖键。
 
@@ -158,3 +161,63 @@ author_bio_layout:                      # [S17] 全员作者简介（内容字�
   pt: 9                                 # [SC] 字号类按用户裁定保持现值（final-recommendations.md A-4 的 pt 部分取消）
   first_line_indent_chars: 0            # [JT] 范文作者信息全部顶格（x0=57.6，无首行缩进，2026-11-12，A-4）
   one_paragraph_per_author: false       # [JT] 范文：首作者/通信作者各一段、其余作者合并一段（2026-11-12，D-5/L-4）
+
+# ── authors 域：作者 / 单位 / 关联 / 简介 结构（GC-2026-1112-06 阶段 0+1 新增，元数据驱动生成）──
+# 只承载"结构键 + 少量格式参数"，不硬编码整句模板；整句由生成器（阶段 2 tools/paper.py）按
+# 元数据拼接。字号字体一律沿用现 profile 值（本轮只加结构与关联模式，不加字号）。
+#
+# S2 偏差登记（PF-W12：范本实证优先于期刊文字明示）：
+#   writing-spec.yaml `author_affiliation_inline` [S2] 现登记「作者姓名（一级单位全称
+#   二级单位全称，所在市 邮编）」行内括号式；范本实证（extract-report §2 行 2/3/4、§8）为
+#   上标编号式——姓名后上标单位编号、单位列表置于独立居中单位行。按 PF-W12 以范本实证
+#   优先，本文档落地为上标编号式（affiliation_style: numbered_superscript）；
+#   writing-spec 的 S2 原文保留不删（作为期刊明示原文登记，供编辑部核实时引用）。
+authors:
+  affiliation_style: numbered_superscript   # [JT] 上标编号式（S2 偏差登记见上方注释块）
+  corresponding_mark: "*"                   # [S18] 通信作者姓名右上角上标星号
+  corresponding_mark_position: after_numbers  # [JT] 范本上标「1,2,*」星号置于单位编号之后
+  name_separator_zh: "，"                   # [JT] 中文署名作者间全角逗号（张汉宁，勾善文，…）
+  name_separator_en: ", "                   # [JT] 英文署名作者间半角逗号+空格（ZHANG Hanning, GOU Shanwen, …）
+  number_separator: ","                     # [JT] 单位编号之间半角逗号（1,2,*）
+  affiliation_list_alignment: center        # [JT] 中/英单位行均居中（长列表折行仍居中）
+  front_order:                              # [JT] 首页自上而下顺序（extract-report §2 逐行实录）
+    - title_zh                             #   1 中文标题
+    - authors_zh                           #   2 中文署名（含上标）
+    - affiliations_zh                      #   3 中文单位（编号列表）
+    - abstract                             #   4 中文摘要
+    - keywords                             #   5 中文关键词
+    - funding                              #   6 基金项目（插在关键词与英文标题之间）
+    - title_en                             #   7 英文标题
+    - authors_en                           #   8 英文署名（含上标）
+    - affiliations_en                      #   9 英文单位（编号列表）
+    - abstract_en                          #  10 英文 Abstract
+    - keywords_en                          #  11 英文 Keywords
+  front_corresponding_line: false          # [JT]+用户裁定：首页无独立通信作者行；通信信息只以
+                                           #   署名上标 *（corresponding_mark）+ 文末「通信作者*」段承载
+  funding_positions: [front, back]         # [JT] 基金项目重复登出两处：首页（关键词后）+ 文末
+                                           #   作者信息节首段（写法略异，范文实证）
+  bio_section:                             # [S17]+[JT]
+    heading: 作者信息                       # [JT] 文末节标题（宋体、无编号、顶格）
+    position: after_references             # [JT] 位于参考文献之后
+    paragraph_labels:                      # [JT] 四段依次；标签后接全角冒号「：」由生成器拼接，不硬编码进模板
+      funding: 基金项目
+      first_author: 作者简介
+      corresponding: "通信作者*"            # [JT] 标签含上标星号；用词「通信」非「通讯」（C-3 已固化）
+      other_authors: 其他作者
+    bio_field_order:                       # [S17]+[JT] S17 字段清单 + 首作者全字段序内含「单位」（职位之后）；
+      - 出生年                              #   「单位」非 bio 对象键，由 affiliation_ids 解析注册表拼得
+      - 性别
+      - 籍贯
+      - 学位
+      - 职称
+      - 单位
+      - 研究方向
+      - 通信地址
+      - 邮政编码
+      - 电子邮箱
+      - 电话
+    other_author_reduced_fields:           # [JT] 其余作者合并为一段，字段精简仅：出生年、性别、单位、从事工作
+      - 出生年
+      - 性别
+      - 单位
+      - 从事工作
