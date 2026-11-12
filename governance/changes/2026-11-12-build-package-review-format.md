@@ -184,3 +184,16 @@ T2 实施期间实测到工作树存在**并发线 GC-2026-1112-01 的在途改�
 ---
 
 *GC-2026-1112-02。规则依据：AGENTS.md F9/F5/F6；构建依据 governance/build.md PF-B5/PF-B6/PF-B7，新增 PF-B15/PF-B16；审核依据 governance/review.md PF-RV7，新增 PF-RV8；计划 temp/GC-2026-1112-02/plan.md（v1.1）。*
+
+---
+
+## 12. 补充 A1（2026-11-12）：论文字数带宽澄清
+
+- 用户指令（原文）："15000字可上下浮动，13000-16000字。"
+- 基线：`d2b6556`（工作树干净）。
+- 变更清单：① `governance/review.md` PF-RV8 新增"字数带宽"条款（目标 15000 可上下浮动，执行带宽 13000–16000；带宽内满足条①，越界 P1），同步修订过渡条款示例；附录"投稿"条后加 [注]（快照原文不改写）。② `templates/paper/writing-spec.yaml` `min_chars: null → 13000`、`max_chars: null → 16000`（机械核对键随澄清落值）。
+- 理由：PF-RV8 首版将条①按"以上"判为无容差硬约束；用户作为权威信息源澄清为可浮动带宽，属规则语义修正，非新增规则（`rules_version` 保持 0.3.0，无新规则 id）。
+- 风险与恢复：单点语义，revert 本补充提交即回"15000 字以上"判定；附录快照未动，保真不受影响。
+- 验证：grep 断言 review.md 含"13000–16000"与 [注] 注记；writing-spec.yaml python3 -I 解析且 min/max 落值正确；附录快照 sha256 复算与 impl-t2-minimax.md 登记值（9b6c95a4…）一致。
+- 边界：七篇论文 writing-spec.yaml 的传播仍属开放项 O2（论文侧独立仓，另立任务）；`stie.yaml` 无字数键，不受影响。
+- 实施：general-minimax；diff 复核：general-glm；提交：主会话按复核结论执行（hash 见 git log 同日）。
