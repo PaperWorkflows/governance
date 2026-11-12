@@ -19,6 +19,10 @@ fail is not a check):
                         key is rejected
   G. writing-spec    — every paper's writing-spec.yaml parses and carries the
                         target-venue constraints
+  H. citation rule   — GC-2026-1112-01 positives: the [N] superscript rule
+                        neither misses (docx count == markdown source count,
+                        Bibliography excluded on both sides) nor overreaches
+                        (comma-space intervals like [12, 40] stay body text)
 
 Usage:
     python3 -I tools/verify_layout.py [--paper-root <papers dir>]

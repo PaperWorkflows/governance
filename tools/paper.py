@@ -231,7 +231,7 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.1.0", date: str = None) -> str:
+                     rules_version: str = "0.3.0", date: str = None) -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
     chapters = DEFAULT_CHAPTERS.get(paper_type, DEFAULT_CHAPTERS["empirical"])
@@ -419,7 +419,7 @@ def cmd_proposal(args):
         title=args.title.strip(),
         author_id=author_pinyin.lower(),
         paper_type=args.paper_type,
-        rules_version="0.1.0",
+        rules_version="0.3.0",
         date=args.date,
     )
     (dest / "paper.yaml").write_text(paper_yaml_content, encoding="utf-8")
@@ -2250,6 +2250,36 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
     if caption_bold is False:
         for sid in ("Caption", "ImageCaption", "TableCaption"):
             check(f"{sid.lower()}_bold_off", "0", bold_val_of(sid))
+
+    # Run-level DIRECT bold can override the style definition: e.g. markdown
+    # `**关键词：**` inside an AbstractTitle div makes pandoc inject <w:b /> on
+    # the runs, so the label still renders faux-bold while the style itself says
+    # bold=off (GC-2026-1112-01 impl review P1-1, found on P6/P7).
+    def _direct_bold_on(para: str) -> bool:
+        for m in re.finditer(r"<w:b(?:\s[^>]*)?/>", para):
+            if not re.search(r'w:val="(?:0|false)"', m.group(0)):
+                return True
+        return False
+
+    if heading_bold is False or caption_bold is False:
+        guarded = set()
+        if heading_bold is False:
+            guarded |= {"Heading1", "Heading2", "Heading3", "Heading4", "Heading5", "AbstractTitle"}
+        if caption_bold is False:
+            guarded |= {"Caption", "ImageCaption", "TableCaption"}
+        offenders = []
+        for pm in re.finditer(r"<w:p\b.*?</w:p>", docxml, re.S):
+            para = pm.group(0)
+            st = re.search(r'<w:pStyle w:val="([^"]+)"', para)
+            if st and st.group(1) in guarded and _direct_bold_on(para):
+                offenders.append(st.group(1))
+        if offenders:
+            failures.append({"check": "heiti_run_direct_bold_absent",
+                             "expected": f"no direct <w:b/> in {sorted(guarded)} paragraphs",
+                             "actual": sorted(set(offenders))})
+        else:
+            notes.append({"check": "heiti_run_direct_bold_absent", "value": 0})
+
     if label_align:
         m = re.search(r'<w:jc w:val="([a-z]+)"\s*/>', _style_block(styles, "AbstractTitle"))
         check("abstract_title_alignment", label_align, m.group(1) if m else None)
@@ -2422,8 +2452,11 @@ def _superscript_run_parts(run: str, t_open: str, text: str) -> tuple[list[str],
 def _apply_citation_superscript(docx_path: Path) -> int:
     """Mark every in-text numeric citation as superscript on the produced docx.
 
-    A citation split across two runs is NOT re-joined — the coverage assertion
-    fails the build visibly instead of silently mis-rendering (PF-B12).
+    A citation split across two runs is NOT re-joined: the coverage assertion
+    only sees citations that are complete within one run, so a split citation
+    passes the build silently and is caught post-hoc by the verify_layout
+    count-parity check (H 组) — not, as PF-B12 first claimed, by the build
+    itself (GC-2026-1112-01 impl review P2-1; run merging is an open item).
     Returns the number of citations marked."""
     src = zipfile.ZipFile(docx_path)
     parts = {n: src.read(n) for n in src.namelist()}
@@ -2437,7 +2470,12 @@ def _apply_citation_superscript(docx_path: Path) -> int:
             out.append(segment[last:rm.start()])
             last = rm.end()
             tm = re.search(r"(<w:t[^>]*>)([^<]*)</w:t>", run)
-            if not tm or any(marker in run for marker in _RUN_NON_TEXT_MARKERS) \
+            # Only rebuild runs of the exact shape [rPr?][one w:t]; anything else
+            # (multiple w:t, breaks, fields) is passed through untouched — the
+            # rebuild would silently DROP everything after the first </w:t>
+            # (GC-2026-1112-01 impl review P2-2).
+            if not tm or len(re.findall(r"<w:t[\s>/]", run)) != 1 \
+                    or any(marker in run for marker in _RUN_NON_TEXT_MARKERS) \
                     or not _CITATION_PATTERN.search(tm.group(2)):
                 out.append(run)
                 continue

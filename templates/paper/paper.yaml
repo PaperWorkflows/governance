@@ -14,7 +14,7 @@ paper_type: null
 stage: intake
 stage_state: active
 manuscript_kind: research
-rules_version: null
+rules_version: 0.3.0
 applicable_rules: []
 rule_exemptions: []
 layout_profile: stie               # L1 venue profile（templates/layout/registry.yaml 登记）。
