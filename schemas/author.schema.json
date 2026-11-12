@@ -1,64 +1,171 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:paperfactory:author:1",
-  "title": "Author Registry Entry",
+  "$id": "urn:paperfactory:author:3",
+  "title": "Authors Document (per-paper authors.yaml)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "name", "affiliations"],
+  "required": ["authors"],
+  "description": "Per-paper authors.yaml document model (GC-2026-1112-06 corrected design, control-board ruling 2026-11-13).\n\nThis schema validates the ENTIRE authors.yaml DOCUMENT (a mapping), not a single author entry: the affiliations registry is declared ONCE at document level and every author entry links its units via affiliation_ids. A registry per author entry is a design defect (drift); document-level is the contract.\n\nBARE-LIST FORMAT DEPRECATED (作废): the legacy top-level `- id: ...` array (P1/P2/P3 style) is no longer a valid document shape — this schema is type object + required authors, so a bare list fails validation. The migration phase (phase 3) normalizes all seven papers to the container: schema_version + affiliations (registry, one copy) + authors (byline-ordered list).\n\nAuthor-2 migration notes (normalize during phase 3):\n  - some current files use `author_id` on entries — the registry key is `id` (paper.yaml authors[].author_id joins to this `id`);\n  - `roles` is NOT part of the registry model — per the GC-2026-1112-06 division of labor, order/roles/display name live in paper.yaml.authors, the registry carries identity/affiliation numbering/bio;\n  - legacy entry `postal_code` is deprecated — migrate into affiliations[].postcode (unit line) and/or bio.postcode (bio).\n\nCROSS-LEVEL REFERENCE (not schema-expressible): [affiliation_ids must resolve to a same-document affiliations registry entry by id] is a cross-level constraint that JSON Schema cannot express. It is ENFORCED BY A BUILD-TIME CHECK (phase 2, tools/paper.py): any dangling affiliation_ids value fails the build. A document that uses affiliation_ids must therefore also carry the affiliations registry.\n\nname_en on every registry item is REQUIRED (venue S5 Chinese/English pair): the English byline and affiliation-number list are generated from it — missing name_en fails the English front-matter build.",
   "properties": {
-    "id": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "^[a-z][a-z0-9_]*$",
-      "description": "Lowercase identifier used as reference key in paper.yaml authors[].author_id"
-    },
-    "name": {
-      "type": "string",
-      "minLength": 1,
-      "pattern": "\\S",
-      "description": "Full name in native script"
-    },
-    "name_en": {
-      "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "\\S" },
-        { "type": "null" }
-      ],
-      "description": "Name in English / romanized"
+    "schema_version": {
+      "type": "integer",
+      "description": "Format version of this authors.yaml document (optional; current files carry schema_version: 1)"
     },
     "affiliations": {
       "type": "array",
       "minItems": 1,
+      "description": "Unit registry, ONE copy for the whole document (design ruling 2026-11-13: never per-entry). Each item: {id, name, name_en} required; city / postcode optional. id must be unique across the registry (build-time check).",
       "items": {
-        "type": "string",
-        "minLength": 1,
-        "pattern": "\\S"
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "name_en"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "Registry key referenced by author affiliation_ids"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Unit name in Chinese — full name including first-level and second-level unit (venue S2: 一级+二级单位全称)"
+          },
+          "name_en": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Unit name in English — REQUIRED per venue S5 (中英成对); the English byline/affiliation line is generated from it. Missing name_en fails the build."
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "City in the unit line, e.g. 海口 (rendered '…，海口 570208' per journal-measured template)"
+          },
+          "city_en": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "City name for the ENGLISH unit line (pinyin transliteration, e.g. 昆明 → Kunming). REQUIRED deviation fix GC-2026-1112-06 收尾: the English affiliation list '1. <name_en>, <city> <postcode>, China' must carry the romanized city (范本 'Haikou 570208, China'), not the Chinese city. When missing, the English line falls back to the Chinese `city` (旧行为，保兼容)."
+          },
+          "postcode": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Postal code (China: 6 digits), e.g. 570208"
+          }
+        }
       }
     },
-    "email": {
-      "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "^\\S+@\\S+\\.\\S+$" },
-        { "type": "null" }
-      ]
-    },
-    "orcid": {
-      "anyOf": [
-        { "type": "string", "pattern": "^\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]$" },
-        { "type": "null" }
-      ]
-    },
-    "git_name": {
-      "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "\\S" },
-        { "type": "null" }
-      ],
-      "description": "Git commit identity name (if different from paper name)"
-    },
-    "git_email": {
-      "anyOf": [
-        { "type": "string", "minLength": 1, "pattern": "^\\S+@\\S+$" },
-        { "type": "null" }
-      ],
-      "description": "Git commit identity email (private noreply preferred)"
+    "authors": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Author entries, in BYLINE ORDER (首页/文末按此顺序署名). Cross-reference rule: each affiliation_ids value must resolve to a document-level affiliations registry id — enforced by the build-time check (phase 2), not this schema.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "Lowercase author key; paper.yaml authors[].author_id joins to this id (reference key across paper.yaml / authors.yaml)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S",
+            "description": "Full name in native script"
+          },
+          "name_en": {
+            "anyOf": [
+              { "type": "string", "minLength": 1, "pattern": "\\S" },
+              { "type": "null" }
+            ],
+            "description": "Name in English / romanized (English byline, venue S5 bilingual pairing)"
+          },
+          "affiliation_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "description": "Unit ids referencing the document-level affiliations registry; drives the superscript unit numbers of the byline and the affiliation-number list (journal-measured template). Resolution is a build-time check (phase 2); a dangling id fails the build."
+          },
+          "bio": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "birth_year",
+              "gender",
+              "hometown",
+              "degree",
+              "title",
+              "research_direction",
+              "address",
+              "postcode",
+              "email",
+              "phone"
+            ],
+            "description": "Author bio fields (venue S17; key names snake_case English, Chinese S17 field noted per key). All ten required: S17 lists all and the journal-measured template prints the full set for the first author. hometown (籍贯) required — appears in S17 and in the measured template bio ('陕西安康人'). The '单位' segment of the printed bio is NOT a bio key; it is resolved from affiliation_ids via the registry at generation time.",
+            "properties": {
+              "birth_year": { "type": "integer", "description": "出生年；rendered as '1984 年生' (journal-measured template)" },
+              "gender": { "type": "string", "enum": ["男", "女"], "description": "性别" },
+              "hometown": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "籍贯，e.g. 陕西安康（journal-measured '…，男，陕西安康人，…'）" },
+              "degree": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "学位，e.g. 工学博士" },
+              "title": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "职称，e.g. 研究员" },
+              "research_direction": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "研究方向，e.g. 人工智能、大数据、智能系统" },
+              "address": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "通信地址" },
+              "postcode": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "邮政编码" },
+              "email": { "type": "string", "minLength": 1, "pattern": "^\\S+@\\S+\\.\\S+$", "description": "电子邮箱（bio 内 S17 字段）" },
+              "phone": { "type": "string", "minLength": 1, "pattern": "^[0-9+()\\- ]+$", "description": "电话（journal-measured plain text, e.g. <电话已脱敏>）" }
+            }
+          },
+          "email": {
+            "anyOf": [
+              { "type": "string", "minLength": 1, "pattern": "^\\S+@\\S+\\.\\S+$" },
+              { "type": "null" }
+            ],
+            "description": "Contact email (registry level)"
+          },
+          "orcid": {
+            "anyOf": [
+              { "type": "string", "pattern": "^\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]$" },
+              { "type": "null" }
+            ]
+          },
+          "git_name": {
+            "anyOf": [
+              { "type": "string", "minLength": 1, "pattern": "\\S" },
+              { "type": "null" }
+            ],
+            "description": "Git commit identity name (if different from paper name)"
+          },
+          "git_email": {
+            "anyOf": [
+              { "type": "string", "minLength": 1, "pattern": "^\\S+@\\S+$" },
+              { "type": "null" }
+            ],
+            "description": "Git commit identity email (private noreply preferred)"
+          },
+          "affiliations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "description": "LEGACY free-text unit strings (pre-GC-2026-1112-06). Kept OPTIONAL for compatibility; the new model uses document-level affiliations + affiliation_ids, and the generator prefers affiliation_ids."
+          }
+        }
+      }
     }
   }
 }
