@@ -250,6 +250,10 @@ rules:
     file: governance/review.md
     title: Target Venue Format Compliance Review
     review_roles: [R-A, R-D]
+  - id: PF-RV8
+    file: governance/review.md
+    title: Venue Format and Polish Rules (Global)
+    review_roles: [governance, R-A, R-B, R-C, R-D, independent_reviewer]
 
   - id: PF-V1
     file: governance/versions.md
