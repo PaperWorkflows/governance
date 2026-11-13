@@ -2781,6 +2781,19 @@ CAPTION_MATCH_CHARS = 12       # normalized caption prefix used to locate the
                                 # caption line in the PDF text layer
 
 
+class FigureToolUnavailable(Exception):
+    """A poppler tool a PDF figure assertion depends on could not be run.
+
+    PF-B12: a check that cannot run is not a pass. Raised when the tool is
+    missing from PATH, times out, exits non-zero or yields unmeasurable
+    output. These states used to be conflated with legitimate negative
+    results ("the PDF carries no text layer", "the slot carries no ink"),
+    which let a build with unverified figure slots ship (P1 defect found by
+    independent verification, 2026-11-13); the caller maps this to
+    status=unavailable and fails the build instead.
+    """
+
+
 def _docx_relationship_targets(doc_parts: dict) -> dict:
     """Map relationship id -> target from word/_rels/document.xml.rels.
 
@@ -2902,14 +2915,25 @@ def _pdf_text_lines(pdf_path: Path) -> list:
 
     pdftotext -bbox-layout emits <line> elements inside <page> elements;
     lines are sorted by (page, y) so single-column documents read top-down.
+    An empty list means the PDF genuinely carries no text layer; a tool that
+    cannot be run raises FigureToolUnavailable (PF-B12: never a silent skip).
     """
     try:
         r = subprocess.run(["pdftotext", "-bbox-layout", str(pdf_path), "-"],
                            capture_output=True, timeout=120)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
+    except subprocess.TimeoutExpired:
+        raise FigureToolUnavailable(
+            "pdftotext timed out; figure captions cannot be located in the PDF text layer, "
+            "so the non-blank figure-slot assertion cannot run")
+    except OSError as exc:  # includes FileNotFoundError — pdftotext not on PATH
+        raise FigureToolUnavailable(
+            f"pdftotext could not be run ({exc}); figure captions cannot be located in the "
+            "PDF text layer, so the non-blank figure-slot assertion cannot run")
     if r.returncode != 0:
-        return []
+        raise FigureToolUnavailable(
+            "pdftotext failed: " + r.stderr.decode("utf-8", "replace")[:120]
+            + "; figure captions cannot be located in the PDF text layer, so the "
+              "non-blank figure-slot assertion cannot run")
     html = r.stdout.decode("utf-8", "replace")
     lines = []
     page_no = 0
@@ -3055,7 +3079,14 @@ def _locate_caption_line(lines: list, caption_text: str, used: set) -> dict | No
 
 def _region_ink_ratio(pdf_path: Path, page: int, page_w: float,
                       top_pt: float, bottom_pt: float) -> float | None:
-    """Non-white ratio of a PDF page region, rendered via pdftoppm -gray."""
+    """Non-white ratio of a PDF page region, rendered via pdftoppm -gray.
+
+    None is returned only for a degenerate region (rounds to zero pixels at
+    FIGURE_RENDER_DPI) — a document-geometry negative, not a tool fault.
+    A tool that cannot be run, or output that cannot be measured, raises
+    FigureToolUnavailable: the ink assertion would otherwise be skipped
+    silently and an unverified slot would ship (PF-B12).
+    """
     dpi = FIGURE_RENDER_DPI
 
     def px(v: float) -> int:
@@ -3066,20 +3097,47 @@ def _region_ink_ratio(pdf_path: Path, page: int, page_w: float,
         return None
     tmp = pdf_path.with_name(pdf_path.name + ".figregion.tmp")
     try:
-        r = subprocess.run(["pdftoppm", "-gray", "-r", str(dpi), "-f", str(page), "-l", str(page),
-                            "-x", "0", "-y", str(px(top_pt)), "-W", str(w_px), "-H", str(h_px),
-                            "-singlefile", str(pdf_path), str(tmp)],
-                           capture_output=True, timeout=120)
+        try:
+            r = subprocess.run(["pdftoppm", "-gray", "-r", str(dpi), "-f", str(page), "-l", str(page),
+                                "-x", "0", "-y", str(px(top_pt)), "-W", str(w_px), "-H", str(h_px),
+                                "-singlefile", str(pdf_path), str(tmp)],
+                               capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise FigureToolUnavailable(
+                "pdftoppm timed out; the figure-slot region cannot be rendered, so the "
+                "non-blank figure-slot assertion cannot run")
+        except OSError as exc:  # includes FileNotFoundError — pdftoppm not on PATH
+            raise FigureToolUnavailable(
+                f"pdftoppm could not be run ({exc}); the figure-slot region cannot be "
+                "rendered, so the non-blank figure-slot assertion cannot run")
         if r.returncode != 0:
-            return None
-        return _pgm_ink_ratio(Path(str(tmp) + ".pgm"))
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
+            raise FigureToolUnavailable(
+                "pdftoppm failed: " + r.stderr.decode("utf-8", "replace")[:120]
+                + "; the figure-slot region cannot be rendered, so the non-blank "
+                  "figure-slot assertion cannot run")
+        ink = _pgm_ink_ratio(Path(str(tmp) + ".pgm"))
+        if ink is None:
+            raise FigureToolUnavailable(
+                "pdftoppm produced no measurable PGM output; the figure-slot ink ratio "
+                "cannot be determined, so the non-blank figure-slot assertion cannot run")
+        return ink
     finally:
         try:
             Path(str(tmp) + ".pgm").unlink(missing_ok=True)
         except Exception:  # noqa: BLE001 - a leftover temp render is not fatal
             pass
+
+
+def _pdf_figures_unavailable(error: str) -> dict:
+    """Unavailable-result shape shared by every poppler tool gate (PF-B12).
+
+    status=unavailable makes the caller record a pdf_figure_verification_failed
+    limitation and fail the build; the failure entry keeps the manifest's
+    failures list and the CLI error payload self-explanatory.
+    """
+    return {"check": "pdf_figures", "status": "unavailable",
+            "failures": [{"kind": "figure_tool_unavailable", "detail": error}],
+            "notes": [], "error": error}
 
 
 def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figures_dir: Path) -> dict:
@@ -3103,7 +3161,10 @@ def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figu
        the build: that is the 2026-11-12 empty-figure-slot regression.
 
     Failures are returned in the "failures" list; the caller records them in
-    the manifest and fails the build (PF-B12: no silent pass).
+    the manifest and fails the build (PF-B12: no silent pass). A poppler tool
+    an assertion depends on that is missing or failing maps the whole check to
+    status=unavailable via _pdf_figures_unavailable — the same contract as the
+    pdfimages gate below — so an unverifiable figure never ships.
     """
     result = {"check": "pdf_figures", "status": "pass", "failures": [], "notes": []}
 
@@ -3111,14 +3172,13 @@ def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figu
     try:
         r = subprocess.run(["pdfimages", "-list", str(pdf_path)], capture_output=True, timeout=60)
     except FileNotFoundError:
-        return {"check": "pdf_figures", "status": "unavailable", "failures": [], "notes": [],
-                "error": "pdfimages not found; the PDF's embedded rasters cannot be inventoried"}
+        return _pdf_figures_unavailable(
+            "pdfimages not found; the PDF's embedded rasters cannot be inventoried")
     except subprocess.TimeoutExpired:
-        return {"check": "pdf_figures", "status": "unavailable", "failures": [], "notes": [],
-                "error": "pdfimages timed out"}
+        return _pdf_figures_unavailable("pdfimages timed out")
     if r.returncode != 0:
-        return {"check": "pdf_figures", "status": "unavailable", "failures": [], "notes": [],
-                "error": "pdfimages failed: " + r.stderr.decode("utf-8", "replace")[:120]}
+        return _pdf_figures_unavailable(
+            "pdfimages failed: " + r.stderr.decode("utf-8", "replace")[:120])
     figure_rasters = pattern_tiles = 0
     for line in r.stdout.decode("utf-8", "replace").splitlines()[2:]:
         f = line.split()
@@ -3164,7 +3224,10 @@ def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figu
 
     # ── B. drawing inventory, C. non-blank figure slots ──
     geometry = _docx_figure_geometry(docx_path)
-    lines = _pdf_text_lines(pdf_path)
+    try:
+        lines = _pdf_text_lines(pdf_path)
+    except FigureToolUnavailable as exc:
+        return _pdf_figures_unavailable(str(exc))
     if not lines:
         result["notes"].append("pdftotext produced no text layer; figure-slot region check skipped")
     # The drawing inventory is re-checked here so the PDF-level verification
@@ -3214,7 +3277,10 @@ def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figu
                       "height_pt": round(fig["height_pt"], 1), "status": "pass"})
         if cap["page"] not in pages_checked:
             pages_checked.append(cap["page"])
-        ink = _region_ink_ratio(pdf_path, cap["page"], cap["page_w"], top, cap_top)
+        try:
+            ink = _region_ink_ratio(pdf_path, cap["page"], cap["page_w"], top, cap_top)
+        except FigureToolUnavailable as exc:
+            return _pdf_figures_unavailable(str(exc))
         entry["ink_ratio"] = round(ink, 4) if ink is not None else None
         intruders = []
         if _figure_text_intrusion_applicable(figures_dir, ref):
@@ -3224,7 +3290,8 @@ def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figu
         problems = []
         if ink is None:
             entry["status"] = "ink_unavailable"
-            result["notes"].append(f"figure {idx + 1} ({ref}): slot region could not be rendered/measured")
+            result["notes"].append(f"figure {idx + 1} ({ref}): slot region rounds to zero pixels "
+                                   f"at {FIGURE_RENDER_DPI} DPI; ink assertion skipped")
         else:
             if ink < FIGURE_REGION_MIN_INK:
                 problems.append(f"slot ink ratio {ink:.4f} < {FIGURE_REGION_MIN_INK} (blank figure slot)")

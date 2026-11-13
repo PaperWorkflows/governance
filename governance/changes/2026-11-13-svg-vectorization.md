@@ -6,7 +6,7 @@
 - 计划版本：v0.1 草案（`temp/svg-vector-plan.md`）+ 独立审查（agent-gpt-plus）裁决"修正后批准"，七项修正全部闭合（①改号 ②重写基线 ③PDF 图位断言重做 ④位图引用行为统一 ⑤F9 写盘后独立核验安排 + PF-B12 规则正文留痕 ⑥数据管线补全 ⑦并发前提）
 - 规则依据：AGENTS.md **F9**（变更纪律：编号/基线与计划版本/精确变更清单/理由/备选/风险/恢复/验证）、**F5/F6**（论文侧工作由受派子代理执行、最小改动）；版式语义 **PF-B6**（图表验收——"检查实际 docx/PDF 渲染"）、**PF-B3**（落地校验，无静默降级）、**PF-B12**（落地校验，凡不可校验即不得静默放行）、**PF-B15**（SVG 交付与位图降级语义）、**PF-B7**（manifest 记录）、**PF-B2**（单一正文）
 - 探针实测环境：pandoc 3.9 + LibreOffice 25.2.3.2 + poppler-utils 25.03（pdfimages/pdftotext/pdftoppm/pdffonts）+ librsvg2 2.60 + Noto Serif/Sans CJK SC
-- 流程状态：计划草案 → 独立审查（七项修正）→ **实施 + 自测（本记录收口）→ 待独立核验（主会话派独立 subagent，见 §8）**
+- 流程状态：计划草案 → 独立审查（七项修正）→ **实施 + 自测（本记录收口）→ 独立核验（agent-gpt-plus）完成：实测复现全部自测结论，另发现并闭合一项 P1 缺陷（poppler 工具缺失闸只兑现 pdfimages 一条），修正与复验见 §11**
 
 ---
 
@@ -25,7 +25,7 @@
 - **探针关键结论（复现计划 §4）**：pandoc 对 `figures/x.svg` 引用恒产双源——`<a:blip r:embed="rIdN.png">` + `<asvg:svgBlip r:embed="rIdM.svg">`；P1 三图 extent 453.0×312.8 / 453.0×216.0 / 453.0×219.0 pt。当前工具链下 **SVG-only blip 亦渲染为矢量、非空**（neg1 实测 ink 37.66%/14.88%/8.78%，与正常构建逐位一致）——即 `ab0bdcc` 空图事故在当前环境**不复现**，差异来自宿主状态，代码无法锁死环境，只能靠断言守门（PF-B12）。
 - **题注形态**：P1/P3/P6 为中英双语题注（中文「图 N」+ 英文「Fig. N」，P1 两者相隔约 6pt）；P3 正文额外重复中文题注段（pandoc 隐式题注在后文之前）；P6 正文存在「图4绘制三种方法…」类**干扰行**（以图号开头但非题注）。docx 图段样式 `CaptionedFigure`（含 keepNext），题注段样式 `ImageCaption`。
 
-## 3. 精确变更清单（函数级；`tools/paper.py`，净 +553/−55 行）
+## 3. 精确变更清单（函数级；`tools/paper.py`，净 +586/−55 行）
 
 | # | 位置 | 内容 |
 |---|---|---|
@@ -92,7 +92,7 @@ PF-B12 新增一条（GC-2026-1113-02）：插图在 **docx 与 PDF 两级**验�
 | ink 阈值 ε=1.0% 对极端稀疏图可能误杀 | 现役八篇图位 8.78%–37.66%，余量约 8.8 倍；空白区 0.019%（约 50 倍于阈值下） |
 | 脚注内插图不支持计数配对 | 八篇正文零脚注（2026-11-13 实测）；如未来使用需扩展 `_docx_figure_geometry` 扫描域 |
 | poppler 工具缺失 | 构建失败（PF-B12），与 pdffonts 先例一致 |
-| **待独立核验** | F9 写盘后独立核验由主会话派独立 subagent 执行（本记录交稿时状态：待核验） |
+| **待独立核验** | ~~F9 写盘后独立核验由主会话派独立 subagent 执行（本记录交稿时状态：待核验）~~ **已完成**：agent-gpt-plus 独立核验，§6 各项实测复现，另发现 P1 缺陷一项（poppler 工具缺失闸只兑现 pdfimages 一条），修正与复验矩阵见 §11（2026-11-13 闭合） |
 | 论文侧 .png→.svg 迁移 | P2/P8 待迁（P4/P5/P7 已完成）；P2 线上有在途润色，迁移时机归其内容线 |
 | SVG `<pattern>` 展开 | P6 fig01/02/04 有 pattern；工具侧 64px 豁免 + `pattern_tiles` 记录，展开归论文侧（P1 fig2 已由 `092093d` 完成） |
 | rules_version | 保持 0.3.0（理由见 §9）；若主会话裁定 PF-B12 条文扩充须升版（GC-2026-1112-01 先例：0.2.0→0.2.1 因 PF-B11/PF-B12 正文扩充），需另起一笔同步 `project.yaml`/`rule-index.yaml`/paper.py 常量/`templates/paper/paper.yaml` 与八篇 `paper.yaml`——超出本变更三文件域 |
@@ -108,6 +108,30 @@ PF-B12 新增一条（GC-2026-1113-02）：插图在 **docx 与 PDF 两级**验�
 - 论文侧无回滚动作：P1 为同版本重build（v0.4.10，pending），`git revert b39837a` 仅撤账章节，产物留工作区（PF-B7 旧版本产物不删）；若新断言误伤某篇，该篇记 limitation + 论文侧修 SVG，不回退工具主路径。
 - 工作区不回滚；计划草案与沙盒留痕存 `temp/svg-vector-plan.md`、`/tmp/svgprobe/`（沙盒非入库）。
 
+## 11. P1 缺陷修正与审计注记（2026-11-13，独立核验后订正）
+
+独立核验（agent-gpt-plus）对提交 `3259220` 实测发现一项 **P1 缺陷**：§4 末条与 §8 承诺的"poppler 工具缺失即构建失败"只有 `pdfimages` 一条兑现——`_pdf_text_lines` 把 FileNotFoundError/超时/非零返回与"PDF 无文本层"混同（PATH 剔除 pdftotext 后，含空图位的探针 PDF 判 `status=pass`，notes 记 "no text layer; figure-slot region check skipped"）；`_region_ink_ratio` 对 `None` 只记 note 不入 failures（剔除 pdftoppm 后 `ink_unavailable` 仍 pass）。即 §4 设计的 C 段断言在两条路径上可被整体静默跳过，违背 PF-B12。修正（instruction.git 后续提交，`tools/paper.py` 净 +89/−22 行）：
+
+| 函数 | 修正前 | 修正后 |
+|---|---|---|
+| `_pdf_text_lines` | 工具缺失/超时/非零 → `[]`，与"PDF 无文本层"混同 | 抛 `FigureToolUnavailable`（点名 pdftotext 与被跳过的"题注定位→图位断言"）；仅 PDF 确实无文本层时返回 `[]`（合法阴性） |
+| `_region_ink_ratio` | 一切失败 → `None`，与"区域无墨色"混同 | 工具缺失/超时/非零/PGM 输出不可测 → 抛 `FigureToolUnavailable`（点名 pdftoppm 与影响）；仅区域退化为零像素（文档几何阴性）时返回 `None` |
+| `_verify_pdf_figures` | 仅 pdfimages 三处闸内联返回 unavailable | 四闸统一走新增 `_pdf_figures_unavailable()`：`status=unavailable` + failures 记 `figure_tool_unavailable` + error 点名工具与影响 → 调用方记 `pdf_figure_verification_failed` limitation + 退出码 1（pdfimages 既有先例的形状，failures 列表补齐） |
+
+- **复验矩阵**（探针 `/tmp/svgverify/neg2w.pdf`——第 5 页含真实空图位；对 `_verify_pdf_figures` 直跑，PATH 分别剔除单工具）：
+
+  | 场景 | 修正前 | 修正后 |
+  |---|---|---|
+  | 探针 + 完整 PATH | fail（空图位 ink 0.0000 被捕获） | fail（负例本体不破） |
+  | 探针 + 剔除 pdftotext | **pass（缺陷）** | **unavailable**（`pdftotext could not be run …; figure captions cannot be located …`） |
+  | 探针 + 剔除 pdftoppm | **pass（缺陷）** | **unavailable**（`pdftoppm could not be run …; the figure-slot region cannot be rendered …`） |
+  | 探针 + 剔除 pdfimages | unavailable（既有先例） | unavailable（回归不破） |
+  | P1 现行产物 `build/v0.4.10/*.pdf` + 完整 PATH | pass | **pass**：三图位 ink 0.3766/0.1488/0.0878、pages [5,10,11]、blank []，与 manifest `layout.figures.pdf` 逐项一致，零误杀 |
+
+  回归：`python3 -I tools/paper.py check --paper ../papers/P1-SETDEBATE-20251110` pass（退出码 0）；`python3 -I tools/verify_layout.py` 27 PASS / 0 FAIL。本任务不跑 soffice。
+- **行数订正**：§3 头部原记"净 +553/−55 行"系 `3259220` 实测误记；`git diff dc3e658 3259220 -- tools/paper.py` 实测为 **+586/−55**（本节订正；§3 表内函数级清单内容不变）。
+- **审计注记（论文侧 build-record.md 带入他线未提交节）**：P1 仓库提交 `b39837a`（2026-11-13 14:47:37 +0800）的 build-record.md 除本变更的 GC-2026-1113-02 节外，还带入了另一条工作线**当时未提交**的「PKG-v0.4.10 · 投稿交付包组装（2026-11-13 14:31:27 +0800）」节。经核对：两节内容**均完整、无丢失**（GC 节自 build-record.md L1912 起、PKG 节自 L1862 起，各节数字与 manifest/产物一致），该 PKG 节非本变更产出但已随 `b39837a` 入库。提交信息无法追改，特此在治理记录补痕；论文侧后续整理不得删除该节。
+
 ---
 
-*GC-2026-1113-02。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B2/PF-B3/PF-B6/PF-B7/PF-B12/PF-B15；规则版本 0.3.0；计划 temp/svg-vector-plan.md（v0.1，改号前为 GC-2026-1113-01）+ agent-gpt-plus 独立审查七项修正闭合；论文侧明细见 P1 build-record.md（GC-2026-1113-02 节，提交 b39837a）。*
+*GC-2026-1113-02。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B2/PF-B3/PF-B6/PF-B7/PF-B12/PF-B15；规则版本 0.3.0；计划 temp/svg-vector-plan.md（v0.1，改号前为 GC-2026-1113-01）+ agent-gpt-plus 独立审查七项修正闭合；论文侧明细见 P1 build-record.md（GC-2026-1113-02 节，提交 b39837a）；独立核验后 P1 缺陷修正（poppler 工具缺失闸）与审计注记见 §11。*
