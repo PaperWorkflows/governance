@@ -287,7 +287,7 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.3.0", date: str = None) -> str:
+                     rules_version: str = "0.3.1", date: str = None) -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
     chapters = DEFAULT_CHAPTERS.get(paper_type, DEFAULT_CHAPTERS["empirical"])
@@ -475,7 +475,7 @@ def cmd_proposal(args):
         title=args.title.strip(),
         author_id=author_pinyin.lower(),
         paper_type=args.paper_type,
-        rules_version="0.3.0",
+        rules_version="0.3.1",
         date=args.date,
     )
     (dest / "paper.yaml").write_text(paper_yaml_content, encoding="utf-8")
