@@ -10,7 +10,7 @@ sys.dont_write_bytecode = True
 
 import argparse, hashlib, io, json, re, subprocess, yaml, zipfile
 import xml.etree.ElementTree
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from datetime import datetime, timezone
 
 # layoutlib is a sibling module; -I does not prepend the script dir, so insert it explicitly.
@@ -2741,68 +2741,512 @@ def _apply_math_font_to_output(docx_path: Path, math_font: str | None) -> bool:
     return True
 
 
-SVG_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+# ── SVG vector alternative: keep it, and guard the fallback ─────────────
+# GC-2026-1113-02. pandoc embeds an SVG-referenced image as BOTH a raster
+# <a:blip r:embed> fallback AND an <asvg:svgBlip> SVG alternative. Current
+# LibreOffice renders the SVG, so the PDF figure becomes VECTOR (crisp
+# text); the 96 DPI PNG fallback pandoc generates is what made the shipped
+# PDF figures blurry (P1/P3/P6: measured 605 px @ 96 ppi on 2026-11-13).
+#
+# The 2026-11-12 ab0bdcc measure STRIPPED every svgBlip to work around an
+# empty-figure-slot accident whose root cause was the OPPOSITE defect: an
+# SVG-ONLY blip (no raster fallback), produced by the '../figures/' path
+# form, which LibreOffice rendered as nothing. Stripping traded a
+# render-host-dependent blank slot for guaranteed blur — both are defects.
+# This change keeps the vector quality and turns the historical failure
+# mode into a hard build failure instead: every blip carrying an svgBlip
+# must also carry a raster r:embed fallback whose media part exists. The
+# document itself is NOT modified.
+RASTER_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".emf", ".wmf", ".tif", ".tiff")
+
+# PDF figure verification constants (GC-2026-1113-02, calibrated on P1
+# v0.4.10 rebuilt with vector figures, 2026-11-13):
+FIGURE_RASTER_MIN_PX = 64      # image objects at/below this on BOTH axes are
+                                # SVG <pattern> fills LibreOffice rasterizes
+                                # into tiles (probe-measured 28-49 px; the
+                                # 2026-11-13 P1/P6 builds show 0 tiles — their
+                                # patterns render as vectors); larger ones are
+                                # figure-level rasters and must not appear for
+                                # a vector-referenced figure
+FIGURE_REGION_GAP_PT = 4.0     # slack added between the figure's bottom edge
+                                # and the caption top when deriving the slot
+                                # region (measured image-to-caption gaps on P1:
+                                # 12-35 pt including SVG canvas padding)
+FIGURE_REGION_MIN_INK = 0.01   # non-white ratio floor for a rendered figure
+                                # slot (real P1 figures: 8.8%-37.9%; a blank
+                                # slot measures 0.02% — ~50x below the floor)
+FIGURE_INK_THRESHOLD = 250     # 8-bit gray below this counts as ink
+FIGURE_RENDER_DPI = 150        # slot-region render resolution
+CAPTION_MATCH_CHARS = 12       # normalized caption prefix used to locate the
+                                # caption line in the PDF text layer
 
 
-def _strip_svg_alternatives(docx_path: Path) -> dict:
-    """Drop the SVG alternative from picture blips, keeping the PNG fallback.
+def _docx_relationship_targets(doc_parts: dict) -> dict:
+    """Map relationship id -> target from word/_rels/document.xml.rels.
 
-    pandoc embeds an SVG source as BOTH an <a:blip> PNG fallback and an
-    <asvg:svgBlip> SVG alternative. Word 2016+ renders the SVG; LibreOffice
-    (the PDF conversion step) picks the SVG and renders NOTHING, so the PDF
-    shipped with empty figure slots (P1/P3, 2026-11-12). Removing the SVG
-    alternative leaves the PNG as the single image, which every reader renders.
-
-    The SVG sources stay in the paper's figures/ directory for the venue's
-    separate SVG attachment (S19), so nothing is lost.
+    Attribute order inside <Relationship> is not guaranteed, so each
+    element's Id/Target are read independently.
     """
-    import io
+    rels_name = "word/_rels/document.xml.rels"
+    if rels_name not in doc_parts:
+        return {}
+    mapping = {}
+    for m in re.finditer(r"<Relationship\b[^>]*>", doc_parts[rels_name].decode("utf-8")):
+        rid = re.search(r'Id="([^"]+)"', m.group(0))
+        target = re.search(r'Target="([^"]+)"', m.group(0))
+        if rid and target:
+            mapping[rid.group(1)] = target.group(1)
+    return mapping
+
+
+def _validate_svg_alternatives(docx_path: Path) -> dict:
+    """Assert every SVG-alternative blip keeps a raster fallback.
+
+    Enumerates every <a:blip> in word/document.xml. For each blip carrying
+    an <asvg:svgBlip> (the SVG alternative) it asserts:
+      1. the blip's own r:embed points at a raster image relationship
+         (.png/.jpg/.jpeg/.bmp/.gif/.emf/.wmf/.tif/.tiff),
+      2. that relationship's target part exists inside the package,
+      3. the svgBlip's own r:embed part exists inside the package.
+    Any violation is a hard-failure defect: it is exactly the 2026-11-12
+    ab0bdcc construction (an SVG-only blip from the '../figures/' path form
+    rendered as an empty figure slot). The docx is NOT modified — the SVG
+    alternative stays so the PDF figure renders as vector.
+
+    Returns {"check": "svg_alternatives_preserved", "svg_blips": N,
+    "raster_fallbacks": N, "blips_missing_raster": M, "missing": [...]}.
+    """
     src = zipfile.ZipFile(docx_path)
     parts = {n: src.read(n) for n in src.namelist()}
     doc = parts["word/document.xml"].decode("utf-8")
-    if "svgBlip" not in doc:
-        return {"stripped": 0, "removed_parts": []}
-    rels_name = "word/_rels/document.xml.rels"
-    rels = parts[rels_name].decode("utf-8")
+    rel_target = _docx_relationship_targets(parts)
+    names = set(parts)
 
-    dropped_rids = set()
-
-    def fix_blip(m):
-        """Within one <a:blip>: drop the SVG alternative only if a raster fallback exists."""
+    svg_blips = 0
+    raster_fallbacks = 0
+    missing = []
+    for idx, m in enumerate(re.finditer(r"<a:blip\b[^>]*?(?:/>|>.*?</a:blip>)", doc, re.S)):
         blk = m.group(0)
-        open_tag = blk[:blk.index(">") + 1]
+        open_tag = blk[: blk.index(">") + 1]
         primary = re.search(r'r:embed="([^"]+)"', open_tag)
-        svgs = re.findall(r'<asvg:svgBlip[^>]*r:embed="([^"]+)"', blk)
-        if not svgs or not primary or primary.group(1) in svgs:
-            return blk          # the SVG IS the only image — keep it
-        for rid in svgs:
-            dropped_rids.add(rid)
-        # remove the <a:ext> wrapper that holds only the svgBlip
-        def kill_ext(em):
-            return "" if "svgBlip" in em.group(0) else em.group(0)
-        blk = re.sub(r"<a:ext [^>]*>.*?</a:ext>", kill_ext, blk, flags=re.S)
-        return blk
-
-    doc = re.sub(r"<a:blip\b[^>]*>.*?</a:blip>", fix_blip, doc, flags=re.S)
-
-    removed_parts = []
-    for rid in sorted(dropped_rids):
-        m = re.search(r'<Relationship [^>]*Id="' + re.escape(rid) + r'"[^>]*Target="([^"]+)"[^>]*/>', rels)
-        if not m:
+        svg_rids = re.findall(r'<asvg:svgBlip[^>]*r:embed="([^"]+)"', blk)
+        if not svg_rids:
             continue
-        target = m.group(1)
-        if not target.lower().endswith(".svg"):
-            continue
-        rels = rels.replace(m.group(0), "")
-        part = "word/" + target.lstrip("/")
-        if part in parts:
-            del parts[part]
-            removed_parts.append(part)
+        svg_blips += 1
+        defects = []
+        if not primary:
+            defects.append("no raster r:embed on the blip (SVG-only blip)")
+        else:
+            rid = primary.group(1)
+            target = rel_target.get(rid)
+            if target is None:
+                defects.append(f"raster r:embed={rid} has no relationship")
+            elif not target.lower().endswith(RASTER_EXTENSIONS):
+                defects.append(f"raster r:embed={rid} target {target} is not a raster image")
+            elif "word/" + target.lstrip("/") not in names:
+                defects.append(f"raster r:embed={rid} target {target} is absent from the package")
+        for srid in svg_rids:
+            starget = rel_target.get(srid)
+            if starget is None or "word/" + starget.lstrip("/") not in names:
+                defects.append(f"svgBlip r:embed={srid} media part is absent from the package")
+        if defects:
+            missing.append({"blip": idx, "primary_rid": primary.group(1) if primary else None,
+                            "svg_rids": svg_rids, "defects": defects})
+        else:
+            raster_fallbacks += 1
+    return {"check": "svg_alternatives_preserved", "svg_blips": svg_blips,
+            "raster_fallbacks": raster_fallbacks, "blips_missing_raster": len(missing),
+            "missing": missing}
 
-    parts["word/document.xml"] = doc.encode("utf-8")
-    parts[rels_name] = rels.encode("utf-8")
-    docx_path.write_bytes(_zip_parts(parts))
-    return {"stripped": len(dropped_rids), "removed_parts": removed_parts}
+
+def _docx_figure_geometry(docx_path: Path) -> list:
+    """Per-figure geometry of the produced docx, in document order.
+
+    For every drawing paragraph: the wp:extent (EMU -> pt), the caption text
+    of the following caption-styled paragraph (pandoc's implicit-figure
+    caption — the alt text), and whether the blip carries an SVG
+    alternative. Front/back matter carry no figures, so document order
+    matches the body figure reference order.
+    """
+    src = zipfile.ZipFile(docx_path)
+    parts = {n: src.read(n) for n in src.namelist()}
+    doc = parts["word/document.xml"].decode("utf-8")
+    paras = re.findall(r"<w:p\b.*?</w:p>", doc, re.S)
+    figures = []
+    for i, para in enumerate(paras):
+        if "<w:drawing>" not in para or "a:blip" not in para:
+            continue
+        ext = re.search(r'<wp:extent cx="(\d+)" cy="(\d+)"', para)
+        blip = re.search(r"<a:blip\b[^>]*?(?:/>|>.*?</a:blip>)", para, re.S)
+        blk_open = blip.group(0)[: blip.group(0).index(">") + 1] if blip else ""
+        primary = re.search(r'r:embed="([^"]+)"', blk_open)
+        caption = None
+        if i + 1 < len(paras):
+            nxt = paras[i + 1]
+            style = re.search(r'<w:pStyle w:val="([^"]+)"', nxt)
+            if style and re.search(r"caption", style.group(1), re.I):
+                caption = "".join(re.findall(r"<w:t[^>]*>(.*?)</w:t>", nxt, re.S)) or None
+        figures.append({
+            "para": i,
+            "width_pt": int(ext.group(1)) / 12700 if ext else None,
+            "height_pt": int(ext.group(2)) / 12700 if ext else None,
+            "caption": caption,
+            "has_svg_blip": bool(blip and "svgBlip" in blip.group(0)),
+            "primary_rid": primary.group(1) if primary else None,
+        })
+    return figures
+
+
+def _pdf_text_lines(pdf_path: Path) -> list:
+    """Every text line of the PDF with its bbox, in reading order.
+
+    pdftotext -bbox-layout emits <line> elements inside <page> elements;
+    lines are sorted by (page, y) so single-column documents read top-down.
+    """
+    try:
+        r = subprocess.run(["pdftotext", "-bbox-layout", str(pdf_path), "-"],
+                           capture_output=True, timeout=120)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if r.returncode != 0:
+        return []
+    html = r.stdout.decode("utf-8", "replace")
+    lines = []
+    page_no = 0
+    for pm in re.finditer(r'<page width="([\d.]+)" height="([\d.]+)">(.*?)</page>', html, re.S):
+        page_no += 1
+        for lm in re.finditer(r'<line xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</line>',
+                              pm.group(3), re.S):
+            words = "".join(re.findall(r"<word[^>]*>(.*?)</word>", lm.group(5), re.S))
+            lines.append({"page": page_no, "page_w": float(pm.group(1)), "page_h": float(pm.group(2)),
+                          "x0": float(lm.group(1)), "y0": float(lm.group(2)),
+                          "x1": float(lm.group(3)), "y1": float(lm.group(4)), "text": words})
+    lines.sort(key=lambda ln: (ln["page"], ln["y0"], ln["x0"]))
+    return lines
+
+
+def _pgm_ink_ratio(path: Path) -> float | None:
+    """Non-white pixel ratio of a binary PGM (P5) file — stdlib only.
+
+    Pillow is not a declared toolchain dependency (and is invisible under
+    python3 -I), so the trivial P5 container is parsed directly.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if not data.startswith(b"P5"):
+        return None
+    pos, fields = 2, []
+    while len(fields) < 3:
+        while pos < len(data) and data[pos:pos + 1].isspace():
+            pos += 1
+        if data[pos:pos + 1] == b"#":                     # comment line
+            while pos < len(data) and data[pos:pos + 1] != b"\n":
+                pos += 1
+            continue
+        start = pos
+        while pos < len(data) and not data[pos:pos + 1].isspace():
+            pos += 1
+        fields.append(data[start:pos])
+    pos += 1                                                # single whitespace after maxval
+    try:
+        width, height, maxval = int(fields[0]), int(fields[1]), int(fields[2])
+    except ValueError:
+        return None
+    if maxval > 255:                                        # 16-bit PGM: not produced here
+        return None
+    body = data[pos: pos + width * height]
+    if width * height == 0 or len(body) < width * height:
+        return None
+    ink = sum(1 for b in body if b < FIGURE_INK_THRESHOLD)
+    return ink / (width * height)
+
+
+def _figure_source_candidates(figures_dir: Path, ref: str) -> list:
+    """Resolve a body figure reference to candidate source paths.
+
+    References are written relative to the paper root (figures/x.svg) or,
+    historically, relative to the body directory (../figures/x.svg — the
+    pandoc --resource-path second entry resolves it against <root>/body).
+    """
+    cands = [figures_dir / ref]
+    if ref.startswith("../"):
+        cands.append(figures_dir / ref[3:])
+    cands.append(figures_dir / "body" / ref)
+    cands.append(figures_dir / ref.lstrip("./"))
+    return cands
+
+
+def _classify_figure_refs(figure_refs: list, figures_dir: Path) -> dict:
+    """Split body figure references by source kind (GC-2026-1113-02).
+
+    - svg_refs: referenced as .svg — the PDF figure must be VECTOR.
+    - bitmap_refs: referenced as .png/.jpg/... — the PDF legitimately
+      embeds that bitmap.
+      - raster_only_figures: no same-stem .svg exists (PF-B15 downgrade
+        semantics: the figure IS the bitmap).
+      - raster_ref_with_svg: a same-stem .svg exists but the body still
+        references the bitmap — a MIGRATION state, recorded as a warning,
+        never a build failure (P2 as of 2026-11-13).
+    """
+    bitmap_refs, raster_only, raster_with_svg, svg_refs = [], [], [], []
+    for ref in figure_refs:
+        if PurePosixPath(ref).suffix.lower() in RASTER_EXTENSIONS:
+            bitmap_refs.append(ref)
+            stem = ref.rsplit(".", 1)[0]
+            if any(c.exists() for c in _figure_source_candidates(figures_dir, stem + ".svg")):
+                raster_with_svg.append(ref)
+            else:
+                raster_only.append(ref)
+        else:
+            svg_refs.append(ref)
+    return {"svg_refs": svg_refs, "bitmap_refs": bitmap_refs,
+            "raster_only_figures": raster_only, "raster_ref_with_svg": raster_with_svg}
+
+
+def _figure_text_intrusion_applicable(figures_dir: Path, ref: str) -> bool:
+    """Whether the no-text-intrusion assertion applies to this figure.
+
+    LibreOffice renders SVG-internal <text> as REAL, extractable PDF text
+    (verified 2026-11-13 on P4/P6 figures), so a text-bearing SVG puts its
+    own label lines INSIDE its figure region — counting those as intrusion
+    would fail every healthy build (P2/P4/P5/P6/P7/P8 figures carry <text>).
+    For those figures only the ink assertion applies. Path-only SVGs
+    (P1/P3) and bitmap references contribute no text of their own, so the
+    intrusion assertion applies to them.
+    """
+    if PurePosixPath(ref).suffix.lower() in RASTER_EXTENSIONS:
+        return True
+    for cand in _figure_source_candidates(figures_dir, ref):
+        if cand.exists():
+            if cand.suffix.lower() != ".svg":
+                return False
+            try:
+                return b"<text" not in cand.read_bytes()
+            except OSError:
+                return False
+    return False
+
+
+def _locate_caption_line(lines: list, caption_text: str, used: set) -> dict | None:
+    """Find a figure's caption line in the PDF text layer.
+
+    The caption text comes from the docx (pandoc's implicit-figure caption,
+    which sits directly UNDER the figure). The FIRST occurrence in reading
+    order is the real caption: body-text look-alikes ("如图1所示…") never
+    carry the caption's own wording, and a paper that repeats its caption
+    as a body paragraph (P3 does) repeats it AFTER the pandoc caption.
+    """
+    def norm(s: str) -> str:
+        return re.sub(r"\s+", "", s)
+
+    prefix = norm(caption_text)[:CAPTION_MATCH_CHARS]
+    if len(prefix) < 2:
+        return None
+    for i, ln in enumerate(lines):
+        if i in used:
+            continue
+        if norm(ln["text"]).startswith(prefix):
+            used.add(i)
+            return ln
+    return None
+
+
+def _region_ink_ratio(pdf_path: Path, page: int, page_w: float,
+                      top_pt: float, bottom_pt: float) -> float | None:
+    """Non-white ratio of a PDF page region, rendered via pdftoppm -gray."""
+    dpi = FIGURE_RENDER_DPI
+
+    def px(v: float) -> int:
+        return max(0, int(round(v * dpi / 72)))
+
+    w_px, h_px = px(page_w), px(bottom_pt - top_pt)
+    if w_px <= 0 or h_px <= 0:
+        return None
+    tmp = pdf_path.with_name(pdf_path.name + ".figregion.tmp")
+    try:
+        r = subprocess.run(["pdftoppm", "-gray", "-r", str(dpi), "-f", str(page), "-l", str(page),
+                            "-x", "0", "-y", str(px(top_pt)), "-W", str(w_px), "-H", str(h_px),
+                            "-singlefile", str(pdf_path), str(tmp)],
+                           capture_output=True, timeout=120)
+        if r.returncode != 0:
+            return None
+        return _pgm_ink_ratio(Path(str(tmp) + ".pgm"))
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    finally:
+        try:
+            Path(str(tmp) + ".pgm").unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001 - a leftover temp render is not fatal
+            pass
+
+
+def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figures_dir: Path) -> dict:
+    """PDF-level figure assertions (GC-2026-1113-02), run after conversion.
+
+    A) Raster budget — pdfimages image objects wider OR taller than
+       FIGURE_RASTER_MIN_PX (soft masks excluded) must not exceed the number
+       of figures the body references as bitmaps: every vector-referenced
+       figure must reach the PDF as vector. <=64px tiles are SVG <pattern>
+       fills LibreOffice rasterizes — counted as pattern_tiles, never failed.
+
+    B) Drawing inventory — the docx must hold one drawing per referenced
+       figure; a reference without a drawing ships an empty slot.
+
+    C) Non-blank figure slot — each figure's caption is located in the PDF
+       text layer by its docx caption text; the region between the caption
+       top and the figure height above it (wp:extent from the docx) must
+       carry ink, and no body-text line may intrude into it (applied only
+       where the figure cannot contribute text of its own — see
+       _figure_text_intrusion_applicable). A blank or intruded slot fails
+       the build: that is the 2026-11-12 empty-figure-slot regression.
+
+    Failures are returned in the "failures" list; the caller records them in
+    the manifest and fails the build (PF-B12: no silent pass).
+    """
+    result = {"check": "pdf_figures", "status": "pass", "failures": [], "notes": []}
+
+    # ── A. raster budget ──
+    try:
+        r = subprocess.run(["pdfimages", "-list", str(pdf_path)], capture_output=True, timeout=60)
+    except FileNotFoundError:
+        return {"check": "pdf_figures", "status": "unavailable", "failures": [], "notes": [],
+                "error": "pdfimages not found; the PDF's embedded rasters cannot be inventoried"}
+    except subprocess.TimeoutExpired:
+        return {"check": "pdf_figures", "status": "unavailable", "failures": [], "notes": [],
+                "error": "pdfimages timed out"}
+    if r.returncode != 0:
+        return {"check": "pdf_figures", "status": "unavailable", "failures": [], "notes": [],
+                "error": "pdfimages failed: " + r.stderr.decode("utf-8", "replace")[:120]}
+    figure_rasters = pattern_tiles = 0
+    for line in r.stdout.decode("utf-8", "replace").splitlines()[2:]:
+        f = line.split()
+        if len(f) < 5 or f[2] != "image":
+            continue
+        try:
+            w, h = int(f[3]), int(f[4])
+        except ValueError:
+            continue
+        if w > FIGURE_RASTER_MIN_PX or h > FIGURE_RASTER_MIN_PX:
+            figure_rasters += 1
+        else:
+            pattern_tiles += 1
+
+    classes = _classify_figure_refs(figure_refs, figures_dir)
+    bitmap_refs = classes["bitmap_refs"]
+    unexpected = figure_rasters - len(bitmap_refs)
+    result.update({
+        "figure_level_rasters": figure_rasters,
+        "pattern_tiles": pattern_tiles,
+        "svg_ref_figures": len(classes["svg_refs"]),
+        "bitmap_ref_figures": len(bitmap_refs),
+        "unexpected_rasters": unexpected,
+        "raster_only_figures": classes["raster_only_figures"],
+        "raster_ref_with_svg": classes["raster_ref_with_svg"],
+    })
+    if unexpected > 0:
+        result["failures"].append({
+            "kind": "figure_level_raster_present",
+            "detail": (f"{unexpected} figure-level raster image(s) (>{FIGURE_RASTER_MIN_PX}px) beyond the "
+                       f"{len(bitmap_refs)} bitmap-referenced figure(s): a vector-referenced figure reached "
+                       "the PDF as a raster (svgBlip stripped?) or an extra raster was embedded"),
+        })
+    elif unexpected < 0:
+        result["notes"].append(
+            f"{len(bitmap_refs)} bitmap-referenced figure(s) but only {figure_rasters} figure-level "
+            f"raster(s) in the PDF (a source bitmap embedded below the {FIGURE_RASTER_MIN_PX}px floor); "
+            "recorded, not failed")
+    if classes["raster_ref_with_svg"]:
+        result["notes"].append(
+            "body references a bitmap while a same-stem .svg exists (migration pending, not a build "
+            f"failure): {', '.join(classes['raster_ref_with_svg'])}")
+
+    # ── B. drawing inventory, C. non-blank figure slots ──
+    geometry = _docx_figure_geometry(docx_path)
+    lines = _pdf_text_lines(pdf_path)
+    if not lines:
+        result["notes"].append("pdftotext produced no text layer; figure-slot region check skipped")
+    # The drawing inventory is re-checked here so the PDF-level verification
+    # is self-contained: a referenced figure that lost its drawing ships an
+    # empty slot no matter what the PDF shows (the docx step fails fast on the
+    # same condition before the conversion runs).
+    if len(geometry) < len(figure_refs):
+        result["failures"].append({
+            "kind": "figure_drawing_count_mismatch",
+            "detail": (f"the docx holds {len(geometry)} figure drawing(s) for {len(figure_refs)} "
+                       "referenced figure(s) — a referenced figure has no drawing in the document"),
+        })
+    elif len(geometry) > len(figure_refs):
+        result["notes"].append(
+            f"the docx holds {len(geometry)} figure drawing(s) for {len(figure_refs)} referenced "
+            "figure(s) (front/back-matter or non-body figures); recorded, not failed")
+    used_lines: set = set()
+    pages_checked: list = []
+    figure_regions: list = []
+    blank_regions: list = []
+    if len(geometry) != len(figure_refs):
+        result["notes"].append(
+            f"docx drawing count ({len(geometry)}) differs from body figure reference count "
+            f"({len(figure_refs)}); figures are paired by document order")
+    for idx, (fig, ref) in enumerate(zip(geometry, figure_refs)):
+        entry = {"figure": idx + 1, "ref": ref, "has_svg_blip": fig["has_svg_blip"]}
+        figure_regions.append(entry)
+        if fig["height_pt"] is None:
+            entry["status"] = "extent_missing"
+            result["notes"].append(f"figure {idx + 1} ({ref}): no wp:extent in the docx; region check skipped")
+            continue
+        if not fig["caption"]:
+            entry["status"] = "caption_absent"
+            result["notes"].append(f"figure {idx + 1} ({ref}): no caption paragraph in the docx; region check skipped")
+            continue
+        cap = _locate_caption_line(lines, fig["caption"], used_lines) if lines else None
+        if cap is None:
+            entry["status"] = "caption_unlocated"
+            entry["detail"] = "caption text not found in the PDF text layer"
+            result["notes"].append(
+                f"figure {idx + 1} ({ref}): caption not located in the PDF text layer; region check skipped")
+            continue
+        cap_top = cap["y0"]
+        top = max(0.0, cap_top - fig["height_pt"] - FIGURE_REGION_GAP_PT)
+        entry.update({"page": cap["page"], "caption_top": round(cap_top, 1),
+                      "region": [round(top, 1), round(cap_top, 1)],
+                      "height_pt": round(fig["height_pt"], 1), "status": "pass"})
+        if cap["page"] not in pages_checked:
+            pages_checked.append(cap["page"])
+        ink = _region_ink_ratio(pdf_path, cap["page"], cap["page_w"], top, cap_top)
+        entry["ink_ratio"] = round(ink, 4) if ink is not None else None
+        intruders = []
+        if _figure_text_intrusion_applicable(figures_dir, ref):
+            intruders = [ln for ln in lines if ln["page"] == cap["page"]
+                         and ln["y1"] > top + 1.0 and ln["y0"] < cap_top - 1.0]
+        entry["text_lines_in_region"] = len(intruders)
+        problems = []
+        if ink is None:
+            entry["status"] = "ink_unavailable"
+            result["notes"].append(f"figure {idx + 1} ({ref}): slot region could not be rendered/measured")
+        else:
+            if ink < FIGURE_REGION_MIN_INK:
+                problems.append(f"slot ink ratio {ink:.4f} < {FIGURE_REGION_MIN_INK} (blank figure slot)")
+            if intruders:
+                problems.append(f"{len(intruders)} body-text line(s) intrude into the slot "
+                                f"(first: {intruders[0]['text'][:30]!r})")
+        if problems:
+            entry["status"] = "blank_or_intruded"
+            entry["detail"] = "; ".join(problems)
+            blank_regions.append(entry)
+            result["failures"].append({"kind": "blank_figure_region", "figure": idx + 1, "ref": ref,
+                                       "page": cap["page"], "detail": "; ".join(problems)})
+        elif entry["status"] != "ink_unavailable":
+            entry["status"] = "pass"
+    result["pages_checked"] = sorted(pages_checked)
+    result["figure_regions"] = figure_regions
+    result["blank_figure_regions"] = [
+        {"figure": b["figure"], "ref": b["ref"], "page": b.get("page"), "detail": b.get("detail")}
+        for b in blank_regions]
+    if result["failures"]:
+        result["status"] = "fail"
+    return result
 
 
 def _repair_header_footer_relationships(docx_path: Path) -> dict:
@@ -3046,13 +3490,29 @@ def _cmd_build_docx_impl(args) -> tuple:
                                f"paper with missing figures (PF-B6)"),
                      "figure_refs": len(refs), "figures_embedded": len(embedded),
                      "stage": "build", "stderr": result.stderr[:500]}, 1)
+        # GC-2026-1113-02: every referenced figure must reach the document as a
+        # DRAWING, not merely as a media part — a package can carry the media
+        # while the body lost the drawing, which would ship an empty figure
+        # slot (the media-count check above cannot see that: pandoc embeds
+        # BOTH the raster fallback and the SVG per figure).
+        figure_geometry = _docx_figure_geometry(output_file)
+        if len(figure_geometry) < len(refs):
+            return ({"status": "error",
+                     "error": (f"the produced document holds {len(figure_geometry)} figure drawing(s) "
+                               f"for {len(refs)} referenced figures — shipping it would deliver the "
+                               f"paper with missing figure slots (PF-B6/PF-B12)"),
+                     "figure_refs": len(refs), "figure_drawings": len(figure_geometry),
+                     "stage": "build", "stderr": result.stderr[:500]}, 1)
 
         _inject_paper_title_header(output_file, title)
         # pandoc copies the header/footer parts but not their relationships;
         # close the graph so the delivered docx is a valid package.
         hf_repair = _repair_header_footer_relationships(output_file)
-        # LibreOffice renders the SVG alternative as nothing; keep the PNG fallback.
-        svg_stripped = _strip_svg_alternatives(output_file)
+        # GC-2026-1113-02: KEEP the SVG alternative so the PDF figure renders
+        # as vector (crisp text); ASSERT every svgBlip still carries a raster
+        # fallback. An SVG-only blip is the 2026-11-12 empty-figure-slot
+        # regression ('../figures/' path form) and fails the build.
+        svg_verified = _validate_svg_alternatives(output_file)
         # pandoc drops m:mathPr from the reference settings.xml; re-apply it so the
         # profile's math font actually reaches the document.
         math_font = (layout["role"].get("fonts", {}).get("math") or (None, None))[1]
@@ -3071,7 +3531,34 @@ def _cmd_build_docx_impl(args) -> tuple:
         layout_notes.append({"check": "header_footer_relationship_repair", "value": hf_repair})
         if citations_marked is not None:
             layout_notes.append({"check": "citation_superscript_marked", "value": citations_marked})
-        layout_notes.append({"check": "svg_alternatives_stripped", "value": svg_stripped})
+        layout_notes.append({"check": "svg_alternatives_preserved", "value": svg_verified})
+        # GC-2026-1113-02: a body figure referenced as a bitmap while a
+        # same-stem .svg exists is a MIGRATION state (its PDF embeds the
+        # original bitmap — high resolution but not vector), recorded as a
+        # warning; it is not a build failure (P2 as of 2026-11-13, with an
+        # in-flight polish line on the same body).
+        ref_classes = _classify_figure_refs(refs, dest)
+        if ref_classes["raster_ref_with_svg"]:
+            layout_notes.append({"check": "figure_raster_ref_with_svg",
+                                 "value": ref_classes["raster_ref_with_svg"],
+                                 "note": ("body references a bitmap whose same-stem .svg exists — the PDF "
+                                          "embeds that bitmap (high resolution, not vector); migrating the "
+                                          "reference to .svg yields a vector figure slot (PF-B15); "
+                                          "recorded, not a build failure")})
+        # GC-2026-1113-02: the SVG-alternative guard is a hard failure — a
+        # blip carrying an svgBlip without a raster fallback is exactly the
+        # 2026-11-12 empty-figure-slot construction.
+        if svg_verified["blips_missing_raster"]:
+            failures.append({
+                "check": "svg_alternatives_preserved",
+                "expected": "every <a:blip> carrying an <asvg:svgBlip> also carries a raster "
+                            "r:embed fallback whose media part exists",
+                "actual": svg_verified["missing"],
+                "hint": ("an SVG-only blip renders as an EMPTY figure slot (ab0bdcc, 2026-11-12): "
+                         "reference figures as 'figures/x.svg' (the pandoc --resource-path already "
+                         "covers it) so pandoc emits the PNG fallback alongside the svgBlip; the "
+                         "'../figures/' form produces an SVG-only blip"),
+            })
 
         # ── content-compliance assertion: equations must be OMML, not images (S9) ──
         # GC-2026-1112-06 终审返工（P3-7）：公式计数只统计正文区间（body/paper.md），
@@ -3173,6 +3660,20 @@ def _cmd_build_docx_impl(args) -> tuple:
                 "reference_doc": str(layout["refdoc_path"].relative_to(layoutlib.GOV_ROOT)),
                 "reference_doc_sha256_16": refdoc_sha,
                 "assertions": {"failed": 0, "notes": layout_notes},
+                # GC-2026-1113-02: figure provenance — the body references, the
+                # docx media parts, and the SVG-alternative guard result. The
+                # PDF step adds the "pdf" sub-block (raster budget + slot
+                # assertions) to this same block.
+                "figures": {
+                    "refs": refs,
+                    "docx_media": len(embedded),
+                    "docx_figures": len(figure_geometry),
+                    "svg_blips_preserved": svg_verified["svg_blips"],
+                    "raster_fallbacks": svg_verified["raster_fallbacks"],
+                    "blips_missing_raster": svg_verified["blips_missing_raster"],
+                    "raster_only_figures": ref_classes["raster_only_figures"],
+                    "raster_ref_with_svg": ref_classes["raster_ref_with_svg"],
+                },
                 # Font families the profile requires; the PDF step checks each of them
                 # against the embedded set and records any absence as a limitation.
                 "profile_fonts": _profile_font_families(layout["role"]),
@@ -3208,6 +3709,11 @@ def _cmd_build_docx_impl(args) -> tuple:
                      "format": "docx", "output_path": str(docx_out), "manifest_path": str(manifest_file),
                      "artifact_stem": safe_title,
                      "review_status": review_status,
+                     # GC-2026-1113-02: the figure data pipeline — the PDF step
+                     # verifies the produced PDF's figure slots against these
+                     # references and this source directory.
+                     "figure_refs": refs,
+                     "figures_dir": str(dest),
                      "stale_artifact_names": leftovers,
                      "artifact_name_notices": notices,
                      "submission_gaps": submission.get("submission_gaps") or [],
@@ -3415,6 +3921,7 @@ def cmd_build_pdf(args):
             pdf_norm = _pdf_normalize_deterministic(pdf_path)
             manifest_path = Path(docx_result["manifest_path"])
             pdf_fonts: list[str] = []
+            fig_check: dict | None = None
             if manifest_path.exists():
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 manifest["formats"].append("pdf")
@@ -3474,7 +3981,31 @@ def cmd_build_pdf(args):
                 # The whole manifest is written back — the PF-B7 submission block
                 # written by the docx step is preserved as it stands.
                 _atomic_write_json(manifest_path, manifest)
-            return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path), "pdf_fonts": sorted(set(pdf_fonts)) if pdf_fonts else [], "pdf_determinism": pdf_norm})
+                # GC-2026-1113-02: PDF-level figure verification — the raster
+                # budget and the non-blank figure slots. A failure is recorded
+                # in the manifest BEFORE the build fails (PF-B12: an
+                # unverified figure slot must not ship silently), following the
+                # font-inventory pattern above.
+                fig_refs = docx_result.get("figure_refs") or []
+                fig_dir = Path(docx_result.get("figures_dir") or dest)
+                fig_check = _verify_pdf_figures(pdf_path, docx_path, fig_refs, fig_dir)
+                manifest["layout"].setdefault("figures", {})["pdf"] = fig_check
+                if fig_check.get("status") != "pass":
+                    manifest.setdefault("limitations", []).append(
+                        {"kind": "pdf_figure_verification_failed",
+                         "detail": (fig_check.get("error")
+                                    or "; ".join(f.get("detail", "") for f in fig_check.get("failures", []))
+                                    or "figure verification reported a non-pass status")})
+                    _atomic_write_json(manifest_path, manifest)
+                    return emit({"status": "error",
+                                 "error": ("PDF figure verification failed (PF-B12): "
+                                           + (fig_check.get("error")
+                                              or "; ".join(f.get("detail", "") for f in fig_check.get("failures", []))
+                                              or "see manifest layout.figures.pdf")),
+                                 "stage": "pdf-verify", "failures": fig_check.get("failures", []),
+                                 "pdf_path": str(pdf_path)}, 1)
+                _atomic_write_json(manifest_path, manifest)
+            return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path), "pdf_fonts": sorted(set(pdf_fonts)) if pdf_fonts else [], "pdf_determinism": pdf_norm, "figure_assertions": fig_check.get("status") if fig_check else None})
         else:
             return emit({"status": "error", "error": "LibreOffice PDF conversion failed", "stderr": result.stderr[:500]}, 1)
     except Exception as exc:
