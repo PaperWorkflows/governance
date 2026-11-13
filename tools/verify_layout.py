@@ -190,14 +190,25 @@ def _center_abstract_title(styles: bytes) -> bytes:
     return (text[:m.start()] + new_block + text[m.end():]).encode("utf-8")
 
 
+# A numeric in-text citation run: one <w:r> holding a [N] / [N,M] / [N-M] token.
+# Shared by the superscript-removal mutation and the negative's skip guard so the
+# two can never drift apart (GC-2026-1113-03 converted all papers to author-date).
+_CITATION_RUN_PAT = re.compile(
+    r'<w:r\b[^>]*>(?:(?!</w:r>).)*?<w:t[^>]*>'
+    r'(\[\d{1,3}(?:-\d{1,3})*(?:,\d{1,3}(?:-\d{1,3})*)*\])</w:t></w:r>', re.S)
+
+
+def _has_numeric_citation_run(doc: bytes) -> bool:
+    """True when the artifact's body still carries a numeric citation run, i.e.
+    when the superscript-removal negative has something to mutate."""
+    return _CITATION_RUN_PAT.search(doc.decode("utf-8")) is not None
+
+
 def _drop_citation_superscript(doc: bytes) -> bytes:
     """Strip the superscript from one in-text citation run (mutation: coverage
     assertion must catch the plain citation)."""
     text = doc.decode("utf-8")
-    pat = re.compile(
-        r'<w:r\b[^>]*>(?:(?!</w:r>).)*?<w:t[^>]*>'
-        r'(\[\d{1,3}(?:-\d{1,3})*(?:,\d{1,3}(?:-\d{1,3})*)*\])</w:t></w:r>', re.S)
-    m = pat.search(text)
+    m = _CITATION_RUN_PAT.search(text)
     if not m:
         raise AssertionError("no citation run found in document.xml")
     run = m.group(0)
@@ -332,6 +343,17 @@ def section_d(paper_root: pathlib.Path) -> None:
                      b'<w:headerReference r:id="rId10" w:type="default" />', b""))
     for label, mutate in mutations.items():
         target = tmp / f"{label}.docx"
+        if label == "citation_superscript_removed" and not _has_numeric_citation_run(
+                zipfile.ZipFile(docx).read("word/document.xml")):
+            # GC-2026-1113-03: all papers converted to author-date — with no
+            # numeric citation run in the artifact there is nothing to mutate.
+            # Skipping is a recorded note (E-group precedent: M3-c / P1-d never
+            # a silent pass); a numeric citation run re-triggers the negative
+            # as-is because the guard is gated on the artifact's own content.
+            record(f"D. negative: {label} must fail assertions", True,
+                   "skipped: no numeric citations in artifact "
+                   "(all papers author-date after GC-2026-1113-03 conversion)")
+            continue
         try:
             _mutate_docx(docx, target, mutate)
         except AssertionError as exc:
