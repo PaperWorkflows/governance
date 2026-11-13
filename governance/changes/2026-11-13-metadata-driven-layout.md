@@ -169,6 +169,7 @@
 5. **P3 funding.yaml 属内容线存量**：P3 前端「中图分类号：P208　文献标志码：A」已入 front_notes 未丢（终审返工 P3-3 订正：实测 P3 paper.yaml front_notes 值为「中图分类号：P208　文献标志码：A」，非初稿误记的「TP391」）；P3 funding.yaml 定名与正文渲染一致性问题非本变更范围，留内容线。
 6. **英文块结构差异（GC-2026-1112-05 开放项延续）**：各篇英文题名/作者/单位块形态差异（P1 等）已由生成器统一起源自元数据，形态收敛不再依赖正文手写；存量的英文译名规范性与编辑部复核（开放项 2）继续挂账。
 7. **authors 域声明键登记（终审返工 P2-3，同义登记）**：`affiliation_style` / `affiliation_list_alignment` / `front_corresponding_line` / `bio_section.position` 为**声明键**——不做第二形态实现（避免无人使用的死形态），当前生成器实现范本形态（numbered_superscript / center / 无前端通信行 / after_references），切换需生成器开发。layout-profile.schema.json 的 authors 域 description 与 stie.yaml 各键注释已标同义声明（P2-3 落位）。
+8. **【闭合】开放项 1（P1 结论标题）已闭合**：P1 第 7 章标题「结论与后续」→「结语」（S12 合规；章内四段正文逐字不动，派生章文件 body/07-conclusion.md 同步），v0.4.7→**v0.4.8**（提交 `d01d7f5`）。manifest `submission.conclusion` 落位（1131 非空白字符=第 7 章全文）、`submission_gaps: []`；新旧 docx 526 段逐段 diff 唯一差异即该标题行；verify_layout 26/26、check pass。开放项 2/3/4 仍挂账（owner：用户）。
 
 ## 10. 回滚说明
 
