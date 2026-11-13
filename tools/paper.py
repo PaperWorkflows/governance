@@ -806,7 +806,10 @@ def cmd_check(args):
         "initialized": git_dir.exists(),
     }
 
-    return emit({"status": overall, "paper_id": dest.name, "results": results})
+    # GC-2026-1113-05: fail 必须显式非零退出码（PF-B12——失败静默放行修复）。
+    # overall 只取 pass/fail（初始 pass，各闸仅置 fail），与 error 早返回的 exit 2 对齐。
+    return emit({"status": overall, "paper_id": dest.name, "results": results},
+                0 if overall == "pass" else 2)
 
 # ── version-bump ─────────────────────────────────────────────────
 
@@ -1126,7 +1129,9 @@ def cmd_materials_check(args):
     }
     if fmt == "keyed":
         payload["blocks"] = [{"key": k, "count": len(e)} for k, e in data["blocks"]]
-    return emit(payload)
+    # GC-2026-1113-05: status=fail（发现重复）显式 exit 2，不再静默放行（PF-B12）。
+    # 与上方解析失败的 exit 2 路径一致；JSON 结构不变，status 字段保持供闸门读取。
+    return emit(payload, 0 if status == "pass" else 2)
 
 
 def cmd_materials_debate(args):

@@ -108,7 +108,8 @@
 
 本记录执行时按派单对 GC-2026-1113-03（`governance/changes/2026-11-13-rules-version-0.3.1.md`）做了三项订正 + 一项开放项关闭，证据：
 
-1. **§8c**：`git archive HEAD` 干净快照直跑 `check --paper` 九篇——P1–P8 pass；**P9 fail 为存量问题**（`body_chapters`：`body/` 下缺 01-introduction…06-conclusion 全部 6 个骨架成员；`metadata`：`authors.yaml#authors.'author_e'` bio 缺 address 项，venue S17）。HEAD 原码同样 fail，与 0.3.1 升版（只动 rule-index/project/paper.py×2/记录）无关。（注：`cmd_check` fail 时退出码为 0 是 HEAD 既有行为，与本笔无关，不在本变更范围。）
+1. **§8c**：`git archive HEAD` 干净快照直跑 `check --paper` 九篇——P1–P8 pass；**P9 fail 为存量问题**（`body_chapters`：`body/` 下缺 01-introduction…06-conclusion 全部 6 个骨架成员；`metadata`：`authors.yaml#authors.'author_e'` bio 缺 address 项，venue S17）。HEAD 原码同样 fail，与 0.3.1 升版（只动 rule-index/project/paper.py×2/记录）无关。
+   - **开放项（2026-11-13 升级留档）**：`cmd_check` fail 时退出码为 0 是 HEAD 既有行为，本笔初判"与本笔无关，不在本变更范围"；经主会话独立核验**定级 P1**（PF-B12 直接违反面：依赖退出码的闸门/CI 会把失败当通过，失败静默放行），本笔括号注记**升级为显式开放项**。**状态：已由 GC-2026-1113-05 修复闭合（2026-11-13）**——`cmd_check` 与 `cmd_materials_check` 均改为 status=fail → exit 2，详见 `governance/changes/2026-11-13-check-exit-code.md`（含九篇退出码矩阵与合成负例实测）。
 2. **§3 表头**："4 个文件，净 +1 行改动 ×3"与表 5 行不符；`project.yaml` 并入主表后订正为"4 个文件、表 5 行；净 +1 行改动 ×4 + 新记录"。
 3. **§2 先例表**：`git show fc09407 --stat` 实测该提交同笔改 `tools/paper.py`（+467/−43，含 scaffold 缺省 `"rules_version": "0.2.0"`），补入该行指纹列。
 4. **§9-1**：`templates/paper/paper.yaml` 由本笔追齐至 `0.3.1`，开放项标记"已追齐"（关闭）。
