@@ -861,18 +861,90 @@ def cmd_version_bump(args):
 MATERIALS_FILE = "materials.yaml"
 
 
+class MaterialsFormatError(Exception):
+    """materials.yaml 不可解析/不可读/结构不可识别——拒绝静默返回空（PF-B12）。"""
+
+
+# 判重键字段回退链：identifier → id → title → sha256。
+# P7/P8/P9（顶层 list 形态）条目只有 id，P4/P5 只有 id+title，P6 各块只有 id；
+# 旧实现只按 identifier 判重，字段缺失即把全部条目误报为同一重复组。
+_DEDUP_KEY_FIELDS = ("identifier", "id", "title", "sha256")
+
+
+def _entry_dedup_key(entry):
+    """返回条目的判重键；四个字段全部缺失（None/空）或条目非 dict 时返回 None（跳过判重）。"""
+    if not isinstance(entry, dict):
+        return None
+    for field in _DEDUP_KEY_FIELDS:
+        value = entry.get(field)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value:
+            return f"{field}={value}"
+    return None
+
+
+def _entry_label(entry) -> str:
+    """条目的单行可读描述（debate 上下文用）；容忍非 dict 条目与缺失字段。"""
+    if not isinstance(entry, dict):
+        return str(entry)
+    ident = entry.get("identifier") or entry.get("id") or entry.get("sha256") or "?"
+    title = entry.get("title") or "(untitled)"
+    return f"[{entry.get('type', '?')}] {title} ({ident})"
+
+
 def _load_materials(dest: Path) -> dict:
-    """Load materials.yaml, returning empty structure if missing."""
+    """Load materials.yaml, recognizing all three registry formats (GC-2026-1113-04).
+
+    全库实际存在三种形态：① "materials"——dict + materials: 键（P1–P5）；
+    ② "keyed"——dict + 其他顶层键，键下为条目 list/dict（P6）；③ "list"——顶层
+    list（P7/P8/P9）。旧实现只认 ①，其余静默返回空，导致 add 覆写毁数据、
+    check 恒放行。
+
+    Returns {"format": "materials"|"keyed"|"list"|"empty"|"missing",
+             "raw": <原始解析数据或 None>,
+             "entries": [扁平条目],
+             "blocks": [(键名, [条目]), ...]}   # 仅 keyed 形态非空
+    Raises MaterialsFormatError on parse failure / unreadable file /
+    unrecognized structure.
+    """
     mf = dest / MATERIALS_FILE
     if not mf.exists():
-        return {"materials": []}
+        return {"format": "missing", "raw": None, "entries": [], "blocks": []}
     try:
         data = yaml.safe_load(mf.read_text(encoding="utf-8"))
-        if not isinstance(data, dict) or "materials" not in data:
-            return {"materials": []}
-        return data
-    except Exception:
-        return {"materials": []}
+    except Exception as exc:
+        raise MaterialsFormatError(
+            f"materials.yaml 解析失败或不可读: {mf} — {type(exc).__name__}: {exc}"
+        ) from exc
+
+    if data is None:  # 空文件或纯注释：合法空登记
+        return {"format": "empty", "raw": None, "entries": [], "blocks": []}
+    if isinstance(data, list):
+        return {"format": "list", "raw": data, "entries": list(data), "blocks": []}
+    if isinstance(data, dict):
+        if "materials" in data:
+            materials = data["materials"]
+            if not isinstance(materials, list):
+                raise MaterialsFormatError(
+                    f"materials.yaml 的 materials 键不是列表: {mf}"
+                    f"（type={type(materials).__name__}）"
+                )
+            return {"format": "materials", "raw": data,
+                    "entries": list(materials), "blocks": []}
+        blocks = []
+        for key, value in data.items():
+            if isinstance(value, list):
+                blocks.append((str(key), list(value)))
+            elif isinstance(value, dict):
+                blocks.append((str(key), [v for v in value.values() if isinstance(v, dict)]))
+        entries = [e for _, block in blocks for e in block]
+        return {"format": "keyed", "raw": data, "entries": entries, "blocks": blocks}
+    raise MaterialsFormatError(
+        f"materials.yaml 顶层结构不可识别（既非 dict 也非 list）: {mf}"
+        f"（type={type(data).__name__}）"
+    )
 
 
 def _save_materials(dest: Path, data: dict) -> None:
@@ -892,11 +964,27 @@ def cmd_materials_add(args):
     title = args.title or "(untitled)"
     relevance = args.relevance or "general"
 
-    data = _load_materials(dest)
-    materials = data.get("materials", [])
+    try:
+        data = _load_materials(dest)
+    except MaterialsFormatError as exc:
+        return emit({"status": "error", "error": str(exc)}, 2)
+
+    fmt = data["format"]
+    if fmt in ("keyed", "list"):
+        # 这两种形态下旧实现会先读成空、再把新条目写进 data["materials"] 整体覆写，
+        # 静默摧毁既有登记（GC-2026-1113-04 主缺陷）——拒绝执行且绝不写盘。
+        return emit({
+            "status": "error",
+            "error": (f"materials.yaml 为 {fmt} 形态，`materials add` 仅支持 materials: dict "
+                      f"形态；请手工登记或先转换格式（文件未改动）: {dest / MATERIALS_FILE}"),
+            "format": fmt,
+        }, 2)
+
+    materials = data["entries"]
 
     # Check for duplicates by identifier
-    existing = [m for m in materials if m.get("identifier") == identifier]
+    existing = [m for m in materials
+                if isinstance(m, dict) and m.get("identifier") == identifier]
     if existing:
         return emit({
             "status": "duplicate",
@@ -914,12 +1002,16 @@ def cmd_materials_add(args):
         "status": "registered",
     }
     materials.append(entry)
-    data["materials"] = materials
-    _save_materials(dest, data)
+    # 只把 materials 列表写回：materials 形态保留原始其他顶层键；新建/空文件写标准 dict。
+    # 绝不把 _format/_raw 等内部标记泄进 YAML。
+    out = dict(data["raw"]) if fmt == "materials" else {}
+    out["materials"] = materials
+    _save_materials(dest, out)
 
     return emit({
         "status": "ok",
         "paper_id": dest.name,
+        "format": fmt,
         "added": entry,
         "total_materials": len(materials),
     })
@@ -930,20 +1022,36 @@ def cmd_materials_list(args):
     if not dest.exists():
         return emit({"status": "error", "error": f"Paper directory not found: {dest}"}, 2)
 
-    data = _load_materials(dest)
-    materials = data.get("materials", [])
+    try:
+        data = _load_materials(dest)
+    except MaterialsFormatError as exc:
+        return emit({"status": "error", "error": str(exc)}, 2)
+
+    fmt = data["format"]
 
     # Optional filter by type
     mat_type = getattr(args, "type", None)
-    if mat_type:
-        materials = [m for m in materials if m.get("type") == mat_type]
 
-    return emit({
+    def _filt(entries):
+        if not mat_type:
+            return list(entries)
+        return [m for m in entries if isinstance(m, dict) and m.get("type") == mat_type]
+
+    materials = _filt(data["entries"])
+    payload = {
         "status": "ok",
         "paper_id": dest.name,
+        "format": fmt,
         "count": len(materials),
         "materials": materials,
-    })
+    }
+    if fmt == "keyed":
+        # 按键分组给出，保证 primary_source 等分块条目可辨识；计数与过滤同步。
+        payload["blocks"] = [
+            {"key": key, "count": len(_filt(entries)), "entries": _filt(entries)}
+            for key, entries in data["blocks"]
+        ]
+    return emit(payload)
 
 
 def cmd_materials_check(args):
@@ -951,38 +1059,74 @@ def cmd_materials_check(args):
     if not dest.exists():
         return emit({"status": "error", "error": f"Paper directory not found: {dest}"}, 2)
 
-    data = _load_materials(dest)
-    materials = data.get("materials", [])
+    try:
+        data = _load_materials(dest)
+    except MaterialsFormatError as exc:
+        return emit({
+            "status": "fail",
+            "paper_id": dest.name,
+            "format": "unreadable",
+            "total": 0,
+            "error": str(exc),
+            "duplicate_identifiers": [],
+            "duplicate_titles": [],
+        }, 2)
 
-    # Find duplicates by identifier
-    seen = {}
+    fmt = data["format"]
+    if fmt == "keyed":
+        # 各顶层键独立成组判重：figures/tables 与 primary_source 语义不同，跨块不合并。
+        groups = data["blocks"]
+    else:
+        groups = [("", data["entries"])]
+
+    # Find duplicates by robust key (identifier → id → title → sha256;
+    # entries missing all key fields are skipped, never mass-reported as duplicates)
     duplicates = []
-    for m in materials:
-        ident = m.get("identifier")
-        if ident in seen:
-            duplicates.append({"identifier": ident, "entries": [seen[ident], m]})
-        else:
-            seen[ident] = m
+    total = 0
+    for key, entries in groups:
+        total += len(entries)
+        seen = {}
+        for m in entries:
+            dk = _entry_dedup_key(m)
+            if dk is None:
+                continue
+            if dk in seen:
+                dup = {"identifier": dk.split("=", 1)[1], "key": dk,
+                       "entries": [seen[dk], m]}
+                if key:
+                    dup["block"] = key
+                duplicates.append(dup)
+            else:
+                seen[dk] = m
 
     # Find near-duplicates by title similarity (simple case-insensitive compare)
-    titles = [m.get("title", "").lower().strip() for m in materials]
     title_dups = []
-    for i, t1 in enumerate(titles):
-        for j, t2 in enumerate(titles):
-            if i < j and t1 and t2 and t1 == t2:
-                title_dups.append({
-                    "title": materials[i].get("title"),
-                    "entries": [materials[i], materials[j]],
-                })
+    for key, entries in groups:
+        titles = [(m.get("title") or "").lower().strip() if isinstance(m, dict) else ""
+                  for m in entries]
+        for i, t1 in enumerate(titles):
+            for j, t2 in enumerate(titles):
+                if i < j and t1 and t2 and t1 == t2:
+                    dup = {
+                        "title": entries[i].get("title"),
+                        "entries": [entries[i], entries[j]],
+                    }
+                    if key:
+                        dup["block"] = key
+                    title_dups.append(dup)
 
     status = "pass" if not duplicates and not title_dups else "fail"
-    return emit({
+    payload = {
         "status": status,
         "paper_id": dest.name,
-        "total": len(materials),
+        "format": fmt,
+        "total": total,
         "duplicate_identifiers": duplicates,
         "duplicate_titles": title_dups,
-    })
+    }
+    if fmt == "keyed":
+        payload["blocks"] = [{"key": k, "count": len(e)} for k, e in data["blocks"]]
+    return emit(payload)
 
 
 def cmd_materials_debate(args):
@@ -990,16 +1134,29 @@ def cmd_materials_debate(args):
     if not dest.exists():
         return emit({"status": "error", "error": f"Paper directory not found: {dest}"}, 2)
 
-    data = _load_materials(dest)
-    materials = data.get("materials", [])
+    try:
+        data = _load_materials(dest)
+    except MaterialsFormatError as exc:
+        return emit({"status": "error", "error": str(exc)}, 2)
+
+    fmt = data["format"]
+    materials = data["entries"]
 
     if not materials:
         return emit({"status": "error", "error": "No materials registered. Use 'materials add' first."}, 2)
 
     # Build context from materials
-    context_lines = [f"Paper: {dest.name}", f"Total materials: {len(materials)}", ""]
-    for m in materials:
-        context_lines.append(f"- [{m.get('type', '?')}] {m.get('title', '?')} ({m.get('identifier', '?')})")
+    context_lines = [f"Paper: {dest.name}", f"Total materials: {len(materials)}",
+                     f"Format: {fmt}", ""]
+    if fmt == "keyed":
+        for key, entries in data["blocks"]:
+            context_lines.append(f"## {key}（{len(entries)} 条）")
+            for m in entries:
+                context_lines.append(f"- {_entry_label(m)}")
+            context_lines.append("")
+    else:
+        for m in materials:
+            context_lines.append(f"- {_entry_label(m)}")
     context = "\n".join(context_lines)
 
     prompt = (

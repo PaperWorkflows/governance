@@ -7,6 +7,11 @@
 - 规则依据：AGENTS.md **F9**（变更纪律：编号/基线与计划版本/精确变更清单/理由/备选/风险/恢复/验证）、**F3**（版本管理）、**F8**（规则索引）；版本语义 `governance/versions.md` **PF-V1**（规则追溯——论文 paper.yaml 记录的 rules_version 必须能指向包含其适用规则的版本）、**PF-V3**（版本变更记录）、**PF-V5**（提交分区：治理提交不含论文内容）、**PF-V6**（版本 bump 须在 commit body 记理由）；被升版规则正文：`governance/build.md` **PF-B12**（GC-2026-1113-02 增补的插图双层级验证条文，提交 `3259220`）
 - 基线（2026-11-13 实施时实测）：治理仓 HEAD `75ae414`（fix(build): 题注定位器几何修正）；工作树仅他线 `authors/registry.yaml` 在途未提交（`git status --short` 实测，本提交**严禁 stage**）；论文侧九篇 `paper.yaml` 均 `rules_version: 0.3.0`（各篇构建时真实记录，manifest 已落账）
 - 流程状态：主会话裁定（先例考证）→ **实施 + 自测（本记录收口）→ 独立核验（待主会话派单，F9 要求未经手变更的子代理复核后方可提交）**
+- **订正记录（2026-11-13，GC-2026-1113-04 实施时据独立核验结论订正；本记录提交于 `ea6c1c6`，订正在其后同线提交中落账）**：
+  1. **§8 验证 c 订正**：原文"九篇全 pass"不实——复测 P1–P8 pass（退出码 0），**P9 fail 为存量问题**（`body_chapters`：`body/` 下缺 01-introduction…06-conclusion 全部 6 个骨架成员；`metadata`：`authors.yaml#authors.'author_e'`（作者E）bio 缺 address 项，venue S17）；HEAD 原码（`git archive HEAD` 干净快照直跑 `tools/paper.py check --paper`）同样 fail，与本变更（只动 rule-index/project/paper.py×2/本记录）无关。（注：`ea6c1c6` 提交信息所述缺失项为 research-plan.md/verification.yaml/references.bib/build/AGENTS.md 五项，该五项在提交后已由论文线补齐；当前 fail 项为 body/ 6 章 + bio 缺项，均系论文线存量，与版本号无关）；
+  2. **§3 表头订正**：原文"4 个文件，净 +1 行改动 ×3"与表 5 行不符——`project.yaml` 并入主表计数后为 **4 个文件、5 行、净 +1 行改动 ×4 + 新记录**；
+  3. **§2 先例表 `fc09407` 行补 `tools/paper.py` 指纹**：`git show fc09407 --stat` 实测该提交同笔改 `tools/paper.py`（+467/-43，含 scaffold 缺省 `"rules_version": "0.2.0"`）；
+  4. **§9-1 订正**：`templates/paper/paper.yaml` 已由 GC-2026-1113-04 追齐至 `0.3.1`，该开放项**关闭（已追齐）**。
 
 ---
 
@@ -21,7 +26,7 @@
 | 提交 | 日期 | 版本动作 | rules_version 相关文件指纹（实测 `git show --name-only` + diff） | 传播各篇 paper.yaml |
 |---|---|---|---|---|
 | `a63b477` | 2026-11-11 | 立 0.1.0 | `project.yaml`（+rules_version: 0.1.0）、`templates/paper/paper.yaml`（+null） | 否（当时论文仓未起） |
-| `fc09407` | 2026-11-11 | 0.1.0→0.2.0 | `governance/rule-index.yaml` + `project.yaml` 同笔同步 | 否 |
+| `fc09407` | 2026-11-11 | 0.1.0→0.2.0 | `governance/rule-index.yaml` + `project.yaml` + `tools/paper.py`（+467/-43，含 scaffold 缺省 `"rules_version": "0.2.0"`）同笔同步 | 否 |
 | `ab0bdcc` | 2026-11-12 | 0.2.0→0.2.1 | `governance/rule-index.yaml` + `project.yaml` + `tools/paper.py`（`"rules_version": "0.2.0"`→`"0.2.1"`） | **否**（无任何 paper.yaml） |
 | `118b299` | 2026-11-12 | 0.2.1→0.3.0 | `governance/rule-index.yaml` + `project.yaml` + `tools/paper.py`（新增 PF-B15/B16，MINOR） | 否 |
 | `788d853` | 2026-11-13 | 未升版（保持 0.3.0） | 无（Compact 缩进断言 + profile/schema 新键，零规则正文修改） | — |
@@ -31,7 +36,7 @@
 - **实测结论二（反先例不适用）**：两次未升版先例（`788d853`、GC-2026-1112-06）的共同特征是**零规则正文修改**；GC-2026-1113-02 则实际改动了 `governance/build.md` PF-B12 规则正文（增补插图验证条文），落入 GC-2026-1112-01 的升版触发面（"PF-B11/PF-B12 规则正文扩充 → PATCH 升版"，见 GC-2026-1113-02 §9 引述）。
 - **实测结论三（为何当时未升、现在补）**：GC-2026-1113-02 §9 当时不升的直接约束是"任务文件域限定三文件、禁改他篇论文仓，升版传播不可在本变更内完成"；主会话现已裁定传播不必要（`ab0bdcc` 先例：canonical-only bump 是既定模式），约束解除，升版补行。
 
-## 3. 精确变更清单（4 个文件，净 +1 行改动 ×3 + 新记录）
+## 3. 精确变更清单（4 个文件、表 5 行；净 +1 行改动 ×4 + 新记录）
 
 | # | 文件 | 变更 |
 |---|---|---|
@@ -41,7 +46,7 @@
 | 4 | `governance/changes/2026-11-13-rules-version-0.3.1.md` | 本记录（新增） |
 | 5 | `project.yaml` L3 | `rules_version: 0.3.0` → `0.3.1`（**证据补入项，偏离派单三文件枚举**，理由见 §2 实测结论一） |
 
-**不改**：九篇论文仓任何文件（P1–P9 `paper.yaml` 保持 0.3.0）；`templates/paper/paper.yaml`（保持 0.3.0，理由见 §9-1）；`governance/rule-index.yaml` 规则条目；`governance/build.md` 等规则正文；`schemas/`；`authors/registry.yaml`（他线在途）；`temp/`（草案不入库）；`tools/paper.py` 其余逻辑。
+**不改**：九篇论文仓任何文件（P1–P9 `paper.yaml` 保持 0.3.0）；`templates/paper/paper.yaml`（本提交时保持 0.3.0，理由见 §9-1；**后由 GC-2026-1113-04 追齐至 0.3.1**，见 §9-1 订正）；`governance/rule-index.yaml` 规则条目；`governance/build.md` 等规则正文；`schemas/`；`authors/registry.yaml`（他线在途）；`temp/`（草案不入库）；`tools/paper.py` 其余逻辑。
 
 ## 4. 理由
 
@@ -82,13 +87,13 @@
 |---|---|---|---|
 | a | 语法完整 | `python3 -I -m py_compile tools/paper.py` | 通过 |
 | b | scaffold 缺省生效 | `python3 -I` 导入 `tools/paper.py` 直跑 `build_paper_yaml(...)` 检视 `rules_version` 行 | 输出 `rules_version: 0.3.1`（缺省路径与 L478 实参路径一致） |
-| c | 论文侧不破 | `python3 -I tools/paper.py check --paper` 对 P1（并扩测九篇） | P1 pass（退出码 0）；九篇全 pass（只读校验，零写入） |
-| d | 全仓对账 | `grep -rn rules_version` 覆盖 instruction.git 与九篇论文仓 | canonical/project/paper.py×2 为 0.3.1；九篇 paper.yaml 均 0.3.0；`templates/paper/paper.yaml` 0.3.0（§9-1 预期）；`governance/changes/` 历史记录含 0.3.0 字样不属声明位 |
+| c | 论文侧不破 | `python3 -I tools/paper.py check --paper` 对 P1（并扩测九篇） | **订正（独立核验，见首部订正记录 1）**：P1–P8 pass（退出码 0）；P9 fail 为存量问题（body_chapters 缺 6 个骨架成员 + authors.'author_e' bio 缺 address 项），HEAD 原码（`git archive HEAD` 干净快照）同样 fail，与本变更无关；只读校验，零写入 |
+| d | 全仓对账 | `grep -rn rules_version` 覆盖 instruction.git 与九篇论文仓 | canonical/project/paper.py×2 为 0.3.1；九篇 paper.yaml 均 0.3.0；`templates/paper/paper.yaml` 0.3.0（§9-1 预期；**GC-2026-1113-04 后已追齐为 0.3.1**，见 §9-1 订正）；`governance/changes/` 历史记录含 0.3.0 字样不属声明位 |
 | e | 提交域 | 提交前 `git status --short` + `git diff --cached --name-only` | 仅 4 个目标文件入暂存区；`authors/registry.yaml` 未 stage |
 
 ## 9. 开放项 / 注记
 
-1. **`templates/paper/paper.yaml`（rules_version: 0.3.0）不随本变更升版**：① 两次版本 bump 先例（`ab0bdcc`、`118b299`）的文件指纹均不含该文件——其现值 0.3.0 系 `0c0bc19`（GC-2026-1112-01 整改批次）事后追齐，非 bump 指纹成员；② 功能惰性——scaffold 第 7 步复制模板后，第 8 步以 `build_paper_yaml` 生成内容整体覆写 `paper.yaml`（`tools/paper.py` L472–482），模板该行永不进入新论文；③ 如主会话要求模板与世界完全对齐，单行改动可随时补做（风险为零，收益为声明整洁）。
+1. **`templates/paper/paper.yaml`（rules_version）追齐——开放项已关闭（GC-2026-1113-04 订正）**：本变更提交时该模板保持 0.3.0，理由为——① 两次版本 bump 先例（`ab0bdcc`、`118b299`）的文件指纹均不含该文件——其现值 0.3.0 系 `0c0bc19`（GC-2026-1112-01 整改批次）事后追齐，非 bump 指纹成员；② 功能惰性——scaffold 第 7 步复制模板后，第 8 步以 `build_paper_yaml` 生成内容整体覆写 `paper.yaml`（`tools/paper.py` L472–482），模板该行永不进入新论文。**订正**：GC-2026-1113-04（materials 多格式修复，同线后续提交）已将该模板 `rules_version` 追齐为 `0.3.1`，本开放项关闭；追齐理由（消除声明不一致）与该模板功能惰性的判断不变，改动为单行、风险为零。
 2. **独立核验（F9）待主会话派单**：本记录收口时未经手子代理复核；提交与核验顺序按主会话编排执行。
 3. **版本声明脱钩模式**：本次即"规则正文先落、版本号后补"模式；建议后续规则正文变更在其变更记录中显式判定 rules_version 去留（GC-2026-1113-02 §9 做了理由留白但未裁定，本变更补裁）。
 
