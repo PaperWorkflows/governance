@@ -170,6 +170,10 @@
 6. **英文块结构差异（GC-2026-1112-05 开放项延续）**：各篇英文题名/作者/单位块形态差异（P1 等）已由生成器统一起源自元数据，形态收敛不再依赖正文手写；存量的英文译名规范性与编辑部复核（开放项 2）继续挂账。
 7. **authors 域声明键登记（终审返工 P2-3，同义登记）**：`affiliation_style` / `affiliation_list_alignment` / `front_corresponding_line` / `bio_section.position` 为**声明键**——不做第二形态实现（避免无人使用的死形态），当前生成器实现范本形态（numbered_superscript / center / 无前端通信行 / after_references），切换需生成器开发。layout-profile.schema.json 的 authors 域 description 与 stie.yaml 各键注释已标同义声明（P2-3 落位）。
 8. **【闭合】开放项 1（P1 结论标题）已闭合**：P1 第 7 章标题「结论与后续」→「结语」（S12 合规；章内四段正文逐字不动，派生章文件 body/07-conclusion.md 同步），v0.4.7→**v0.4.8**（提交 `d01d7f5`）。manifest `submission.conclusion` 落位（1131 非空白字符=第 7 章全文）、`submission_gaps: []`；新旧 docx 526 段逐段 diff 唯一差异即该标题行；verify_layout 26/26、check pass。开放项 2/3/4 仍挂账（owner：用户）。
+9. **【闭合】开放项 2/3/4（用户 2026-11-13 三项裁决）已闭合**：
+   - **开放项 2（英文单位名待用户复核）已闭合**：P1/P4/P6/P7 注册表 name_en *Land and Resources Information Center, Department of Natural Resources of Yunnan Province* 经用户 2026-11-13 确认定稿，不再挂账；各篇 paper.yaml.unresolved 同步关闭（P1 条目标题改「（2026-11-13 用户确认定稿）」；P4/P6/P7 对应条目内英文单位名子句的「待用户复核」改为「2026-11-13 用户确认定稿」，随各篇提交一并入库）。P5 自稿「<单位已脱敏> Yunnan Institute of Surveying and Mapping」不属本次裁决范围，继续挂账。
+   - **开放项 3（基金名统一）已闭合**：用户 2026-11-13 裁定基金官方名为「云南省重大科技专项计划项目」（code `202502AD080005`），渲染以各篇 funding.yaml 为准；P2 本即此名（不动），其余六篇 funding.yaml 已统一 `name` 并重建：P1 v0.4.8→**v0.4.9**（`08f2444`）、P3 v0.3.11→**v0.3.12**（`45beae8`）、P4 v0.3.8→**v0.3.9**（`76a16d0`）、P5 v0.4.10→**v0.4.11**（`efb2ed5`）、P6 v0.2.9→**v0.2.10**（`853a205`）、P7 v0.2.10→**v0.2.11**（`f4fed8a`）。各篇验证：docx 前端（关键词后）与文末（作者信息节首段）两处基金行均为「基金项目：云南省重大科技专项计划项目（202502AD080005）」（实测文本见各篇 build-record 新节）；除基金行外逐段 diff 与旧版零差异；manifest `submission_gaps: []`；`paper.py check` pass；verify_layout 26/26。（同步订正 §5 迁移注记中「P1/P3 渲染基金名…迁移为 funding.yaml 登记名『云南省时空大数据重大科技专项』」所指向的旧登记名——该名已按用户裁决替换为官方名，见各篇 build-record 新节。）
+   - **开放项 4（ORCID 待补）已闭合**：用户 2026-11-13 裁定 ORCID **不需要提供**，不再挂账；七篇 authors.yaml `orcid: null` 保持（模板默认亦如此），各篇 unresolved 无 orcid 挂账。
 
 ## 10. 回滚说明
 
