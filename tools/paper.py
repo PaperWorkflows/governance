@@ -4406,6 +4406,25 @@ def _materialize_package(plan: dict) -> None:
         json.dumps(plan["sidecar"], ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _count_docx_tables(docx_path: Path) -> int:
+    """Ground-truth table count from a docx: the number of <w:tbl> in the body.
+
+    A docx is a zip. The count is taken from the DECOMPRESSED 'word/document.xml'
+    (a raw byte search on the still-compressed archive can silently miss or
+    under-count — the same trap verify_layout.py documents at its line ~293).
+    Start tags are matched with a delimiter look-ahead so that the 'tbl' prefixed
+    non-container elements (<w:tblPr>, <w:tblGrid>, <w:tblBorders>) are excluded.
+    Raises PackageFailure when the file or the main document part is unreadable.
+    """
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            raw = zf.read("word/document.xml")
+    except (KeyError, zipfile.BadZipFile, OSError) as exc:
+        raise PackageFailure(f"cannot read word/document.xml from {docx_path}: {exc}") from exc
+    xml_text = raw.decode("utf-8", errors="replace")
+    return len(re.findall(r"<w:tbl(?=[\s/>])", xml_text))
+
+
 def _package_assertions(plan: dict, manifest: dict) -> list:
     """A1-A5 — the PF-B16/PF-B7 cross-checks (PF-B15/B16 enforcement point)."""
     package_dir = plan["package_dir"]
@@ -4469,11 +4488,47 @@ def _package_assertions(plan: dict, manifest: dict) -> list:
     table_missing = sorted(expected_csv - actual_csv)
     table_extra = sorted(actual_csv - expected_csv)
     manifest_missing = sorted(expected_csv - manifest_csv)
-    table_ok = not (table_missing or table_extra or manifest_missing)
-    results.append({"id": "A4", "name": "CSV count matches the tables of body/paper.md (bidirectional)",
+    # ── ground-truth leg (GC-2026-1112-07): the self-consistency comparison above
+    # is NOT a correctness check — a detection miss leaves both sides empty and the
+    # old leg passes vacuously (P3 shipped 3 tables whose header rows had no leading
+    # '|', _package_tables missed them and the old check still passed). The packaged
+    # docx is the same file shipped with the package (sha256 already compared at
+    # package time); count its real <w:tbl>s and require N_tbl == N_csv, where
+    # N_csv is the manifest's tables count (i.e. the number actually exported).
+    N_csv = (manifest.get("tables") or {}).get("count")
+    docx_name = plan.get("docx_name")
+    docx_gt = {"docx_name": docx_name, "N_tbl": None, "N_csv": N_csv,
+               "source": "word/document.xml <w:tbl> count", "matched": False, "error": None}
+    if not docx_name:
+        docx_gt["error"] = "no docx_name in package plan"
+    else:
+        docx_file = package_dir / docx_name
+        if not docx_file.exists():
+            docx_gt["error"] = f"packaged docx missing: {docx_name}"
+        else:
+            try:
+                docx_gt["N_tbl"] = _count_docx_tables(docx_file)
+                docx_gt["matched"] = (docx_gt["N_tbl"] == N_csv)
+            except PackageFailure as exc:
+                docx_gt["error"] = str(exc)
+    table_ok = not (table_missing or table_extra or manifest_missing) and docx_gt["matched"]
+    _n_tbl = docx_gt["N_tbl"]
+    _n_csv = docx_gt["N_csv"]
+    detail = None
+    if not docx_gt["matched"] and _n_tbl is not None:
+        if _n_tbl > (_n_csv or 0):
+            detail = (f"docx 含 {_n_tbl} 个 <w:tbl> 表格但只导出 {_n_csv or 0} 个 CSV——"
+                      f"存在漏检（{_n_tbl - (_n_csv or 0)} 个表格未导出）")
+        elif _n_tbl < (_n_csv or 0):
+            detail = (f"docx 含 {_n_tbl} 个 <w:tbl> 表格却导出/登记了 {_n_csv} 个 CSV——"
+                      f"存在幻影（{(_n_csv or 0) - _n_tbl} 个 CSV 在 docx 中无对应表格）")
+        else:
+            detail = f"docx 含 {_n_tbl} 个 <w:tbl> 表格但导出/检测到 {_n_csv} 个 CSV——存在漏检或幻影"
+    results.append({"id": "A4", "name": "CSV set matches body/paper.md AND the packaged docx table count (bidirectional + ground-truth)",
                     "status": "pass" if table_ok else "fail",
                     "expected": sorted(expected_csv), "packaged": sorted(actual_csv),
-                    "missing": table_missing, "extra": table_extra, "manifest_missing": manifest_missing})
+                    "missing": table_missing, "extra": table_extra, "manifest_missing": manifest_missing,
+                    "docx_ground_truth": docx_gt, "detail": detail})
 
     figures_dir = package_dir / "figures"
     actual_fig = {p.name for p in figures_dir.iterdir() if p.is_file()} if figures_dir.is_dir() else set()
