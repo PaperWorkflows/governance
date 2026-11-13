@@ -50,7 +50,9 @@ This file defines the writing mode execution rules. Writing mode covers: paper b
 - Check title, author, version, publication info, and identifiers. Record actual reading scope (full text, abstract, official record, or excerpt).
 - Unobtained full text does not automatically disqualify citation. Claims supported by abstract may be cited; method details, parameters, proofs, or boundaries from abstract-only must not be written in.
 - Distinguish citation-type from reading-type references. Citation-type must support the specific body claim and be locatable.
-- Citation style follows paper configuration. GB/T 7714-2025 registered as relevant current basis; precise clause mapping pending until implemented.
+- Citation style follows the paper configuration: the venue profile selected by `paper.yaml.layout_profile` is the binding source for bibliographic form.
+- For document types the venue does not specify, the reference-entry templates registered in the venue profile's `citation.fallback_entry_forms` are the binding source of truth (GC-2026-1114-01). Online law/policy text follows the venue's own [EB/OL] template by cross-reference and is not duplicated in the profile.
+- Every reference-list entry carries a GB/T 7714 document-type identifier ([M]/[J]/[C]/[EB/OL]/[Z]/[S]/[S/OL] etc.), taken per GB/T 7714 (author-date system per venue S13).
 - Direct quotes, translations, and figure adaptations must be marked. Unverified key support relationships must be supplemented or claims narrowed.
 
 ### PF-W7 隐私、许可与真实技术条件
@@ -88,7 +90,7 @@ This file defines the writing mode execution rules. Writing mode covers: paper b
 ### PF-W11 目标刊格式约束
 
 - The target venue's own submission format requirements are binding and are recorded machine-checkably in `writing-spec.yaml` (per-paper, collected from the venue).
-- When the venue is silent, the national-standard baseline (GB/T 7713.2-2022 附录 B, CY/T 170-2019, GB/T 3179-2009) applies; the applicable version of each standard is recorded, not assumed.
+- When the venue is silent, the national-standard baseline (GB/T 7713.2-2022 附录 B, CY/T 170-2019, GB/T 3179-2009, and GB/T 7714 for bibliographic description) applies; the applicable version of each standard is recorded, not assumed. GB/T 7713.2-2022 附录 B, CY/T 170-2019, and GB/T 3179-2009 govern layout and publishing form; **GB/T 7714 governs bibliographic description (著录)**, and its applicable edition is the one registered in the venue profile's `citation.standard_edition`.
 - Venue-specific constraints include, where stated by the venue: title length and punctuation policy, abstract length and writing person, keyword count and separator, bilingual block pairing, funding note order, heading numbering sequence, formula source format and symbol classes, figure/table caption requirements, reference citation system and entry order, corresponding-author marking, and author biography fields.
 - A constraint stated as advisory by the venue ("一般不超过…", "…为宜") is treated as a target with tolerance, not as a hard threshold; the tolerance is recorded.
 - Venue constraints are verified by the review mode (PF-RV7) and by build-time checks where they are mechanically decidable (length, separator, presence of required blocks).

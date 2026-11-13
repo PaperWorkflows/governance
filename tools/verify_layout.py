@@ -93,6 +93,7 @@ def section_b() -> None:
                 "heading_bold", "caption_bold", "abstract_label_alignment"):  # GC-2026-1112-01
         baseline["properties"]["typography"].pop(key, None)
     baseline["properties"]["citation"]["properties"].pop("numeric_superscript", None)  # GC-2026-1112-01
+    baseline["properties"]["citation"]["properties"].pop("fallback_entry_forms", None)  # GC-2026-1114-01
     validator = jsonschema.Draft7Validator(baseline)
     detail = []
     ok = True

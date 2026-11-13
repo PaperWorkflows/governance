@@ -308,6 +308,11 @@
             "same_author_same_year_suffix": { "type": "string", "description": "e.g., a/b/c after year" },
             "repeat_citation_page":         { "type": "string", "description": "superscript page after year" }
           }
+        },
+        "fallback_entry_forms": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Reference-entry templates for the four venue-silent document types: keys law [Z] / regulation [Z] / standard [S] / standard_online [S/OL]; online law/policy text follows venue template ④ [EB/OL] by cross-reference and is NOT registered here (single source of truth). Values are {placeholder} templates forming the machine-checkable binding source (PF-W6). Venue-specified templates (专著[M]/期刊[J]/会议[C]∥/预印本[EB/OL]) are not duplicated here. GC-2026-1114-01."
         }
       }
     },

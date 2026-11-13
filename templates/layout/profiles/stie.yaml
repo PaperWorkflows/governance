@@ -151,6 +151,14 @@ citation:
     en_multi: "(Smith et al., 2020)"    # et al.
     same_author_same_year_suffix: "a/b/c"  # 年份后加 a、b、c
     repeat_citation_page: "superscript"    # 出版年后角标著录引文页码
+  # 在线法律/政策文本：按刊方④[EB/OL] 模板著录（[S16]）：
+  #   {author}, {year}. {title}[EB/OL]. （{update_date}）[{access_date}]. 网址：{url}.
+  # 交叉引用刊方模板、不重复登记（单一真值源；GC-2026-1114-01）。
+  fallback_entry_forms:                 # [GB] 刊方未规定 → GB/T 7714 回落条目模板（GC-2026-1114-01）
+    law: "{author}, {year}. {title}（{version}）[Z]."                         # [GB] 法律法规；author=立法/发布主体，year=通过或修正年份，version 如"2020年修订"
+    regulation: "{author}, {year}. {title}：{doc_number}[Z]."                 # [GB]+[JT] 规章/规范性文件；doc_number 如"财会〔2012〕21号"（P5 实例）
+    standard: "{standard_no}, {year}. {title}[S]. {place}: {publisher}."      # [GB]+[JT] 标准；标准号置首作著者（P3 v0.3.16 范文实证）；例 GB/T 22239—2019，2019. 信息安全技术 网络安全等级保护基本要求[S]. 北京：中国标准出版社.；允许可选尾缀"（引用日期 {access_date}）"（P3 实例）
+    standard_online: "{author}, {year}. {title}[S/OL]. {url}. （引用日期 {access_date}）."  # [GB]+[JT] 在线标准；author 二形态均可：标准号置首（同 [S] 惯例）或发布机构（P5 IETF 实例），按文献实际署名形态取用
 references:
   order: [zh_by_pinyin, en_by_surname]  # [S15] 先中文后英文，各按著者拼音/字母排序
   heading_pt: 12                        # [GB] 附录 B
