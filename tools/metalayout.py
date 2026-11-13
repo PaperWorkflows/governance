@@ -514,7 +514,50 @@ def validate_metadata(meta: dict) -> list[str]:
             f"行（大小写不敏感，容忍 `Key words` 变体），请检查 English Abstract 节的"
             f"标签与内容（P2-2）")
 
+    # P3-layout 卫生闸 (2026-11-13, 用户发现)：markdown ATX 标题行（`^#…`）的
+    # 前一行必须为空行（文件首行除外）。pandoc 把「段落后紧接 # 标题」当作段落
+    # 的惰续行（字面 `#` 直接进正文），导致 docx 标题不落 Heading 样式、PDF
+    # 书签丢失（P3 曾 31 个标题中 28 个被吞成段落、书签只剩 4 个）。违例即构建
+    # 失败并列出行号+标题文本。栅栏代码块内的 `#` 行不是标题，跳过。
+    paper_dir = meta.get("dest")
+    if paper_dir is not None:
+        _check_atx_heading_hygiene(Path(paper_dir), paper_id, errors)
+
     return errors
+
+
+def _check_atx_heading_hygiene(dest: Path, paper_id: str, errors: list) -> None:
+    """P3-layout 硬闸 — body/paper.md 每个 ATX 标题行前必须有空行。"""
+    body_path = Path(dest) / "body" / "paper.md"
+    if not body_path.exists():
+        return
+    try:
+        lines = body_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        errors.append(f"[{paper_id}] body/paper.md: ATX 卫生检查无法读取 ({exc})")
+        return
+    in_fence = None
+    for idx, line in enumerate(lines):
+        fm = re.match(r"^\s*(```+|~~~+)(.*)$", line)
+        if fm:
+            marker = fm.group(1)
+            if in_fence is None:
+                in_fence = marker
+            elif in_fence == marker:
+                in_fence = None
+            continue
+        if in_fence is not None:
+            continue
+        if not re.match(r"^#", line):
+            continue
+        if idx == 0:
+            continue  # the file's first line is exempt
+        if lines[idx - 1].strip() != "":
+            errors.append(
+                f"[{paper_id}] body/paper.md:{idx + 1}: ATX 标题前缺少空行——"
+                f"`{line.strip()}` 会被 pandoc 当作段落惰续行渲染（字面 `#` 进正文、"
+                f"标题不落 Heading 样式、PDF 书签丢失）；请在标题行前插入空行"
+                f"（P3-layout 卫生闸）")
 
 
 # ---------------------------------------------------------------------------

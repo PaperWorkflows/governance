@@ -8,7 +8,7 @@ if not sys.flags.isolated:
 
 sys.dont_write_bytecode = True
 
-import argparse, hashlib, json, re, subprocess, yaml, zipfile
+import argparse, hashlib, io, json, re, subprocess, yaml, zipfile
 import xml.etree.ElementTree
 from pathlib import Path
 from datetime import datetime, timezone
@@ -3224,6 +3224,169 @@ def cmd_build_docx(args):
     return emit(payload, code)
 
 
+# ── PDF determinism normalization ────────────────────────────────
+# GC-2026-1113-01: LibreOffice overwrites three PDF fields on every export, so
+# two exports of the same docx differ only in those bytes (verified 2026-11-13 on
+# P1: a byte-diff of two exports shows exactly two regions — Info/CreationDate
+# timestamp, and trailer /ID [ <h32> <h32> ] together with the /DocChecksum that
+# LibreOffice derives from them). The XMP packet dates stay CONSTANT across
+# exports because they come from the deterministic docx metadata, not the wall
+# clock — so they need no normalization. The fix follows the same philosophy as
+# the refdoc determinism (make_refdoc.py's fixed zip timestamps): replace the
+# varying bytes with FIXED values of the SAME byte length, keeping the xref
+# offsets valid. The normalized file is validated (pypdf parse + page count +
+# pdftotext non-empty) before it may replace the export; any check failure keeps
+# the original unnormalized PDF and records a limitation — never publish a
+# possibly corrupt PDF.
+PDF_NORM_FIXED_CREATION_TS = b"20260101000000"          # 14 digits; tz suffix kept
+PDF_NORM_FIXED_ID = b"0102030405060708090A0B0C0D0E0F10"  # 32 hex
+PDF_NORM_FIXED_DOCCHECKSUM = b"A1B2C3D4E5F60718293A4B5C6D7E8F90"  # 32 hex
+
+_PYPDF_MODULE = None
+_PYPDF_TRIED = False
+
+
+def _import_pypdf():
+    """Import pypdf even under `python3 -I` (isolation drops user site-packages).
+
+    pypdf is used here as the corruption canary: count pages BEFORE replacement
+    and re-parse the normalized bytes AFTER replacement. It is installed in the
+    user's site-packages on this host (pypdf 6.20.1); -I hides that path, so it
+    is re-added explicitly — the same explicit sys.path insertion already used
+    for the sibling layoutlib module. A missing pypdf degrades the normalize path
+    to a structural check and never blocks the build.
+    """
+    global _PYPDF_MODULE, _PYPDF_TRIED
+    if _PYPDF_TRIED:
+        return _PYPDF_MODULE
+    _PYPDF_TRIED = True
+    try:
+        import pypdf as _mod
+        _PYPDF_MODULE = _mod
+        return _PYPDF_MODULE
+    except Exception:  # noqa: BLE001 - fall through to the explicit-path retry
+        pass
+    try:
+        import site as _site_mod
+        cand = _site_mod.getusersitepackages()
+        if cand and cand not in sys.path:
+            sys.path.insert(0, cand)
+        try:
+            import pypdf as _mod2
+            _PYPDF_MODULE = _mod2
+        except Exception:  # noqa: BLE001 - pypdf genuinely unavailable
+            _PYPDF_MODULE = None
+    except Exception:  # noqa: BLE001 - site module quirks are not fatal
+        _PYPDF_MODULE = None
+    return _PYPDF_MODULE
+
+
+def _pdf_normalize_deterministic(pdf_path: Path) -> dict:
+    """Same-length metadata normalization for a LibreOffice-exported PDF.
+
+    Replaces the three wall-clock/random fields with fixed same-length values:
+      - Info/CreationDate  (timestamp only; the timezone suffix is kept as-is,
+        so the replacement matches the source length on any LO output)
+      - trailer /ID pair
+      - trailer /DocChecksum
+    Validates before publishing: pypdf parse + page-count equality with the
+    pre-normalization file + a non-empty pdftotext sample. Any failure restores
+    the ORIGINAL bytes and returns status='fallback' (the caller records a
+    limitation; the unnormalized PDF ships, never a possibly corrupt one).
+    Returns dict: {status, fields, reason?, page_count?}.
+    """
+    try:
+        original = pdf_path.read_bytes()
+    except OSError as exc:
+        return {"status": "noop", "reason": f"cannot read pdf: {exc}", "fields": {}}
+    data = original
+    replaced = {"CreationDate": False, "ID": False, "DocChecksum": False}
+
+    # 1. Info dict /CreationDate(D:YYYYMMDDHHMMSS<tz>) -> fixed timestamp
+    m_cre = re.search(rb"/CreationDate\((D:[0-9]{14})([^)\r\n]*)\)", data)
+    if m_cre:
+        fixed = b"/CreationDate(D:" + PDF_NORM_FIXED_CREATION_TS + m_cre.group(2) + b")"
+        if len(fixed) == len(m_cre.group(0)):
+            data = data[: m_cre.start()] + fixed + data[m_cre.end():]
+            replaced["CreationDate"] = True
+
+    # 2. trailer /ID [ <h32><sep><h32> ] -> both halves fixed (sep preserved)
+    m_id = re.search(rb"/ID \[ <([0-9A-Fa-f]{32})>([\r\n ]+)<([0-9A-Fa-f]{32})> \]", data)
+    if m_id:
+        fixed = (b"/ID [ <" + PDF_NORM_FIXED_ID + b">" + m_id.group(2)
+                 + b"<" + PDF_NORM_FIXED_ID + b"> ]")
+        if len(fixed) == len(m_id.group(0)):
+            data = data[: m_id.start()] + fixed + data[m_id.end():]
+            replaced["ID"] = True
+
+    # 3. trailer /DocChecksum /<h32> -> fixed 32 hex
+    data, n_dc = re.subn(rb"/DocChecksum /[0-9A-Fa-f]{32}",
+                         lambda _m: b"/DocChecksum /" + PDF_NORM_FIXED_DOCCHECKSUM, data)
+    replaced["DocChecksum"] = n_dc > 0
+
+    if len(data) != len(original):
+        # A same-length invariant was broken somewhere — never ship that.
+        return {"status": "fallback",
+                "reason": "normalization changed the total byte length; original kept",
+                "fields": replaced, "page_count": None}
+
+    # ── corruption canary / validation (any failure -> fallback) ──
+    reasons = []
+    pypdf_lib = _import_pypdf()
+    page_before = page_after = None
+    if pypdf_lib is None:
+        reasons.append("pypdf not importable; the normalized file got a structural "
+                       "(length/sample) check only")
+    else:
+        try:
+            page_before = len(pypdf_lib.PdfReader(io.BytesIO(original)).pages)
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"pypdf could not parse the pre-normalization file: {str(exc)[:100]}")
+        try:
+            page_after = len(pypdf_lib.PdfReader(io.BytesIO(data)).pages)
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"pypdf could not parse the normalized file: {str(exc)[:100]}")
+            page_after = None
+        if page_before is not None and page_after is not None and page_after != page_before:
+            reasons.append(f"page count changed after normalization: {page_before} -> {page_after}")
+
+    sample_ok = False
+    tmp = pdf_path.with_name(pdf_path.name + ".detnorm.tmp")
+    txt = tmp.with_suffix(".txt")
+    try:
+        tmp.write_bytes(data)
+        r = subprocess.run(["pdftotext", str(tmp), str(txt)], capture_output=True, text=True, timeout=30)
+        text = ""
+        if r.returncode == 0 and txt.exists():
+            text = txt.read_text(encoding="utf-8", errors="replace")
+        sample_ok = r.returncode == 0 and text.strip() != ""
+        if not sample_ok:
+            reasons.append("pdftotext on the normalized bytes returned empty/err output")
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        sample_ok = False
+        reasons.append(f"pdftotext could not run: {str(exc)[:100]}")
+    finally:
+        for _p in (tmp, txt):
+            try:
+                _p.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+    if reasons:
+        # Keep the unnormalized original; the caller records the limitation.
+        try:
+            pdf_path.write_bytes(original)
+        except OSError as exc:
+            return {"status": "fallback",
+                    "reason": "; ".join(reasons) + f"; could not restore original: {exc}",
+                    "fields": replaced, "page_count": None}
+        return {"status": "fallback", "reason": "; ".join(reasons),
+                "fields": replaced, "page_count": page_after}
+
+    pdf_path.write_bytes(data)
+    return {"status": "normalized", "fields": replaced, "page_count": page_after}
+
+
 def cmd_build_pdf(args):
     dest = Path(args.paper)
     if not dest.exists():
@@ -3244,12 +3407,34 @@ def cmd_build_pdf(args):
     try:
         result = subprocess.run(["soffice", "--headless", "--convert-to", "pdf", "--outdir", str(docx_path.parent), str(docx_path)], capture_output=True, text=True, timeout=180)
         if result.returncode == 0 and pdf_path.exists():
+            # GC-2026-1113-01: PDF determinism — normalize the LibreOffice
+            # wall-clock/random metadata fields BEFORE the sha is recorded, so the
+            # shipped PDF (and hence its sha) is deterministic across rebuilds,
+            # exactly as the docx already is. Any failure keeps the unnormalized
+            # original and records a limitation (never publish a corrupt PDF).
+            pdf_norm = _pdf_normalize_deterministic(pdf_path)
             manifest_path = Path(docx_result["manifest_path"])
             pdf_fonts: list[str] = []
             if manifest_path.exists():
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 manifest["formats"].append("pdf")
                 manifest["artifacts"].append({"format": "pdf", "path": str(pdf_path.relative_to(dest)), "sha256": hashlib.sha256(pdf_path.read_bytes()).hexdigest()[:16], "size": pdf_path.stat().st_size})
+                determinism_block = {
+                    "kind": "creationdate_id_docchecksum_same_length",
+                    "status": pdf_norm["status"],
+                    "fields": pdf_norm.get("fields", {}),
+                    "page_count": pdf_norm.get("page_count"),
+                    "note": ("same-length byte normalization of CreationDate / /ID / "
+                             "/DocChecksum; the normalized PDF sha256 is deterministic "
+                             "across rebuilds of the same docx (GC-2026-1113-01)"),
+                }
+                if pdf_norm.get("reason"):
+                    determinism_block["reason"] = pdf_norm["reason"]
+                manifest.setdefault("layout", {})["pdf_determinism"] = determinism_block
+                if pdf_norm["status"] == "fallback":
+                    manifest.setdefault("limitations", []).append(
+                        {"kind": "pdf_deterministic_normalization_fallback",
+                         "detail": "PDF shipped unnormalized: " + (pdf_norm.get("reason") or "validation failed")})
                 # PDF font inventory: declared profile fonts vs actually embedded (LibreOffice
                 # substitutions are recorded here, never silent — PF-B3 no-silent-degradation)
                 fonts_verifiable = True
@@ -3289,7 +3474,7 @@ def cmd_build_pdf(args):
                 # The whole manifest is written back — the PF-B7 submission block
                 # written by the docx step is preserved as it stands.
                 _atomic_write_json(manifest_path, manifest)
-            return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path), "pdf_fonts": sorted(set(pdf_fonts)) if pdf_fonts else []})
+            return emit({"status": "ok", "paper_id": dest.name, "format": "pdf", "output_path": str(pdf_path), "manifest_path": str(manifest_path), "pdf_fonts": sorted(set(pdf_fonts)) if pdf_fonts else [], "pdf_determinism": pdf_norm})
         else:
             return emit({"status": "error", "error": "LibreOffice PDF conversion failed", "stderr": result.stderr[:500]}, 1)
     except Exception as exc:
@@ -3758,8 +3943,9 @@ def _package_body(dest: Path, spec: dict) -> dict:
     }
 
 
-def _extract_abstract(dest: Path, spec: dict) -> tuple[str, list, bool, list]:
-    """(zh abstract text, keywords, english abstract present, field errors)."""
+def _extract_abstract(dest: Path, spec: dict) -> tuple[str, list, str, list, bool, list]:
+    """(zh abstract text, zh keywords, en abstract text, en keywords,
+    english abstract present, field errors)."""
     path = dest / "abstract.md"
     if not path.exists():
         raise PackageFailure(f"abstract.md not found: {path}")
@@ -3799,7 +3985,31 @@ def _extract_abstract(dest: Path, spec: dict) -> tuple[str, list, bool, list]:
                 errors.append("keywords_zh: the keyword line parsed to an empty list")
     en_present = bool(re.search(r"^#{1,6}\s+.*english.*abstract", text, re.IGNORECASE | re.MULTILINE)) \
         or bool(re.search(r"\*{0,2}Keywords\*{0,2}\s*[：:]", text))
-    return abstract_text, keywords, en_present, errors
+    # English abstract full text + English keyword list. Consumed from the
+    # canonical renderer (metalayout._parse_abstract — the same function that
+    # feeds the docx front matter), so the manifest's abstract_en/keywords_en
+    # match what is actually rendered. Its keyword regex is the P2-2 hardened
+    # form: case-insensitive and tolerant of the `Key words` variant
+    # (metalayout._EN_KW_FULL). A missing/empty English section returns empty
+    # and records a gap (DD-2 per-field boundary) — never breaks the build.
+    abstract_en_text = ""
+    keywords_en: list = []
+    try:
+        eng = metalayout._parse_abstract(dest) if metalayout is not None else {}
+    except Exception as exc:  # noqa: BLE001 - a broken en section is a gap, not a crash
+        errors.append(f"abstract_en: English abstract could not be extracted ({exc})")
+        eng = {}
+    if isinstance(eng, dict):
+        abstract_en_text = (eng.get("en") or "").strip()
+        keywords_en = [k for k in (eng.get("keywords_en") or []) if k]
+        if not eng.get("en_section_present"):
+            errors.append("abstract_en: no '## English Abstract' section in abstract.md")
+        else:
+            if not abstract_en_text:
+                errors.append("abstract_en: the English Abstract section is empty")
+            if not keywords_en:
+                errors.append("keywords_en: no English keyword list parsed in the English Abstract section")
+    return abstract_text, keywords, abstract_en_text, keywords_en, en_present, errors
 
 
 def _label_value(text: str, *labels: str):
@@ -4006,16 +4216,24 @@ def _build_submission_block(dest: Path, paper_cfg: dict, release_title: str) -> 
     # ── abstract / keywords / English-abstract presence ──
     abstract_zh = None
     keywords_zh = None
+    abstract_en = None
+    keywords_en = None
     abstract_en_present = None
     try:
-        text, keywords, en_present, field_errors = _extract_abstract(dest, spec)
+        text, keywords, en_text, en_keywords, en_present, field_errors = _extract_abstract(dest, spec)
         abstract_zh = text or None
         keywords_zh = keywords or None
+        abstract_en = en_text or None
+        keywords_en = en_keywords or None
         abstract_en_present = bool(en_present)
         if abstract_zh is None:
             note("abstract_zh_missing", "abstract_zh", "the Chinese abstract is empty")
         if keywords_zh is None:
             note("keywords_zh_missing", "keywords_zh", "no keyword list was parsed")
+        if abstract_en is None:
+            note("abstract_en_missing", "abstract_en", "the English abstract is empty")
+        if keywords_en is None:
+            note("keywords_en_missing", "keywords_en", "no English keyword list was parsed")
         for err in field_errors:
             err_field, _, err_detail = str(err).partition(": ")
             note("abstract_field_error", err_field or "abstract_zh", err_detail or str(err))
@@ -4092,8 +4310,10 @@ def _build_submission_block(dest: Path, paper_cfg: dict, release_title: str) -> 
         "title": release_title,
         "title_en": paper_cfg.get("title_en"),
         "abstract_zh": abstract_zh,
+        "abstract_en": abstract_en,
         "abstract_en_present": abstract_en_present,
         "keywords_zh": keywords_zh,
+        "keywords_en": keywords_en,
         "authors": authors,
         "bio_gaps": bio_gaps,
         "conclusion": conclusion,
@@ -4155,7 +4375,8 @@ def _package_plan(dest: Path, version: str) -> dict:
         raise PackageFailure(f"release manifest is unreadable: {exc}")
 
     body = _package_body(dest, spec)
-    abstract_zh, keywords, abstract_en_present, field_errors = _extract_abstract(dest, spec)
+    (abstract_zh, keywords, abstract_en, keywords_en,
+     abstract_en_present, field_errors) = _extract_abstract(dest, spec)
     authors, bios, bio_gaps = _package_authors(dest, paper_cfg)
     direction, direction_check, direction_gaps, direction_notes = _package_direction(spec)
     figures = _package_figures(dest)
@@ -4220,8 +4441,10 @@ def _package_plan(dest: Path, version: str) -> dict:
         "title": title,
         "title_en": paper_cfg.get("title_en"),
         "abstract_zh": abstract_zh,
+        "abstract_en": abstract_en or None,
         "abstract_en_present": abstract_en_present,
         "keywords_zh": keywords,
+        "keywords_en": keywords_en or None,
         "authors": authors,
         "conclusion": body["conclusion"],
         "total_chars": total_chars,
@@ -4368,9 +4591,10 @@ def _compare_submission_block(submission: dict, manifest: dict) -> list[dict]:
     """PF-B7 shared-field equality between the release submission block and the
     package manifest (A3 extension, GC-2026-1112-04).
 
-    The compared set is fixed: title, title_en, abstract_zh, keywords_zh, the
-    authors sub-domain, conclusion, body_chars.value, total_chars.value and
-    submission_direction. Every comparison is made on the normalised value.
+    The compared set is fixed: title, title_en, abstract_zh, abstract_en,
+    keywords_zh, keywords_en, the authors sub-domain, conclusion, body_chars.value,
+    total_chars.value and submission_direction. Every comparison is made on the
+    normalised value.
     """
     diffs: list[dict] = []
 
@@ -4382,8 +4606,12 @@ def _compare_submission_block(submission: dict, manifest: dict) -> list[dict]:
     cmp("title_en", _norm_cmp_text(submission.get("title_en")), _norm_cmp_text(manifest.get("title_en")))
     cmp("abstract_zh", _norm_cmp_text(submission.get("abstract_zh")),
         _norm_cmp_text(manifest.get("abstract_zh")))
+    cmp("abstract_en", _norm_cmp_text(submission.get("abstract_en")),
+        _norm_cmp_text(manifest.get("abstract_en")))
     cmp("keywords_zh", _norm_cmp_list(submission.get("keywords_zh")),
         _norm_cmp_list(manifest.get("keywords_zh")))
+    cmp("keywords_en", _norm_cmp_list(submission.get("keywords_en")),
+        _norm_cmp_list(manifest.get("keywords_en")))
     cmp("authors", _norm_cmp_authors(submission.get("authors")),
         _norm_cmp_authors(manifest.get("authors")))
     cmp("conclusion", _norm_cmp_text(submission.get("conclusion")),
