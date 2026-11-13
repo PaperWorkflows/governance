@@ -74,7 +74,7 @@
 | b | check 九篇退出码矩阵（修复后） | `paper.py check --paper` ×9 | P1–P8 **pass/exit 0**；**P9 fail/exit 2**（缺陷修复：修复前 P9 fail/exit 0，实测对照成立） |
 | c | materials check 九篇（修复后） | `materials check --paper` ×9 | P1–P9 全 **pass/exit 0**（total 4/4/3/4/15/10/12/3/1，与 GC-2026-1113-04 §9c 一致） |
 | d | 合成负例·list 同 id | `/tmp/gcexit/duplist/`（list 内 `id: X-1` 两条）跑 `materials check` | **status=fail，dups=1，exit=2** |
-| e | 合成负例·keyed 块内同 sha256 | `/tmp/gcexit/dupkeyed2/`（`figures:` 块内两条无 id 条目、同 sha256）跑 `materials check` | **status=fail，dups=1，exit=2**。注：判重键为 identifier→id→title→sha256 首命中回退链（GC-04 设计），条目带 `id` 时 sha256 分支不可达，故负例条目按无 id 构造以命中 sha256 兜底键 |
+| e | 合成负例·keyed 块内同 sha256 | `/tmp/gcexit/dupkeyed2/`（`figures:` 块内两条无 identifier/id/title 条目、同 sha256）跑 `materials check` | **status=fail，dups=1，exit=2**（dup 的 key 为 sha256 值本身）。注：判重链为 identifier→id→title→sha256 **首命中**（`_DEDUP_KEY_FIELDS=("identifier","id","title","sha256")`，`_entry_dedup_key` 按序取第一个非空字段作键，并非逐项回退比对）：条目只要带 `title`（即使两条互不相同）即命中 title 分支，到不了 sha256 分支——2026-11-14 独立核验实测"同 sha256 + 不同 title"两条跑 `materials check` 得 **pass/exit 0**，"同 sha256 + 同 title"则经 title 键判重 fail（key=`title=…`）；故要命中 sha256 兜底键，负例条目须**无 identifier、无 id、且无 title**（本行负例即此构造；原记录"条目按无 id 构造"遗漏 title 项、表述不严谨，2026-11-14 订正） |
 | f | 合成对照·keyed 跨块同 sha256 | `/tmp/gcexit/dupkeyed_cross/`（figures/tables 各一条同 sha256） | pass/exit 0——跨块不合并语义保持，无误报 |
 | g | 不误杀·P1 check | `check --paper P1` | pass/**exit 0**（防"把 pass 也改成非零"的反向错误） |
 | h | 不误杀·materials list | `materials list --paper P2` | exit 0 |
