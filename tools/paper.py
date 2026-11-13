@@ -3575,14 +3575,36 @@ def _package_tables(dest: Path) -> list:
 
     blocks = []
     i = 0
-    while i < len(lines) - 1:
-        if lines[i].strip().startswith("|") and _is_md_separator(lines[i + 1]):
+    n = len(lines)
+    while i < n - 1:
+        s = lines[i].strip()
+        if s.startswith("|") and _is_md_separator(lines[i + 1]):
+            # form 1: header row opens with a pipe (existing behaviour — unchanged)
             j = i + 2
-            while j < len(lines) and lines[j].strip().startswith("|"):
+            while j < n and lines[j].strip().startswith("|"):
                 j += 1
             blocks.append({"start": i, "end": j})
             i = j
             continue
+        if (not s.startswith("|")) and _is_md_separator(lines[i + 1]):
+            # form 2 (pandoc pipe-table semantics): the header row does not open
+            # with '|' but the next line is a valid separator row and the header
+            # splits into the same number of columns — pandoc renders this as a
+            # real <w:tbl> (verified on P3: '分区 | 定位 | 功能说明' / '|---|---|---|').
+            header_cells = _split_md_row(s)
+            sep_cells = _split_md_row(lines[i + 1])
+            if len(header_cells) == len(sep_cells) and len(header_cells) >= 2:
+                j = i + 2
+                while j < n:
+                    row = lines[j].strip()
+                    if not row or "|" not in row:
+                        break
+                    if len(_split_md_row(row)) != len(header_cells):
+                        break
+                    j += 1
+                blocks.append({"start": i, "end": j})
+                i = j
+                continue
         i += 1
 
     captions = []
