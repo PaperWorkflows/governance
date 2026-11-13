@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "LayoutProfile",
-  "description": "Role-based layout profile (L0/L1/L2). additionalProperties: false per PF-B3. GC-2026-1111-02: extended from flat typography to a role/domain model; all pre-existing keys preserved, all new keys optional; missing role keys fall back to typography.body_pt / east_asia_font / latin_font (PF-B10). GC-2026-1112-06: added optional authors domain (author / affiliation / attribution / bio structure); absence of authors (draft.yaml, gbt7713-2-2022.yaml) stays non-blocking for legacy profiles.",
+  "description": "Role-based layout profile (L0/L1/L2). additionalProperties: false per PF-B3. GC-2026-1111-02: extended from flat typography to a role/domain model; all pre-existing keys preserved, all new keys optional; missing role keys fall back to typography.body_pt / east_asia_font / latin_font (PF-B10). GC-2026-1112-06: added optional authors domain (author / affiliation / attribution / bio structure); absence of authors (draft.yaml, gbt7713-2-2022.yaml) stays non-blocking for legacy profiles. GC-2026-1112-06 follow-up fix: added optional tables.cell_first_line_indent_chars (integer, minimum 0, default 0) so pandoc Compact table-cell / tight-list paragraphs explicitly cancel Normal's inherited first-line indent (表单元格缩进归零); absence in the three profiles (draft/gbt7713/stie) stays valid and defaults to 0.",
   "type": "object",
   "additionalProperties": false,
   "required": ["profile", "kind"],
@@ -219,6 +219,12 @@
         "header_fill":           { "type": "string", "pattern": "^(?:#[0-9A-Fa-f]{6}|none)$", "description": "Header-row cell background fill: a hex colour (e.g. \"#E5EBF0\") or \"none\". Absent = none (no w:shd written). Journal-measured 2026-11-12: 范文表头浅灰底 RGB(0.898,0.922,0.941) ≈ #E5EBF0, 黑字." },
         "caption_bilingual":     { "type": "boolean", "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文表题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical." },
         "body_pt":               { "type": "number", "exclusiveMinimum": 0 },
+        "cell_first_line_indent_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "First-line indent (CJK char widths) of pandoc Compact table-cell / tight-list paragraphs. GC-2026-1112-06 follow-up fix: pandoc's Compact inherits Normal's 2-char body indent via BodyText (Normal carries w:firstLineChars='200'), so table cell text (and tight list items) rendered with a 2-char first-line indent against the template (表内文字顶格). This key makes compaction prescribe the effective indent explicitly on the Compact style, overriding the inherited body indent; default 0 (flush). Absent = 0."
+        },
         "header_alignment":      { "type": "string", "enum": ["center", "left"] },
         "note_position":         { "type": "string", "enum": ["below_table", "above_table"] }
       }

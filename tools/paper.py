@@ -2383,6 +2383,28 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
         block = _style_block(styles, "Table")
         check("table_three_line_borders", True, layoutlib.three_line_table_ok(block))
 
+    # GC-2026-1112-06 follow-up fix (表单元格缩进归零): pandoc Compact (table cells
+    # + tight lists) is basedOn BodyText -> Normaltime, and Normal carries the correct
+    # 2-char body first-line indent. Compact itself has no w:ind, so every table-cell /
+    # tight-list paragraph would inherit the body indent — against the template whose
+    # table text sits flush. build_refdoc now writes Compact's effective indent
+    # explicitly from tables.cell_first_line_indent_chars (default 0); this assertion
+    # pins that the profile value actually landed in the produced artifact. Artifacts
+    # built from the PRE-FIX refdoc carry no explicit Compact w:ind (they inherit the
+    # body indent) — recorded as a stale note, not a build failure; a rebuilt artifact
+    # whose explicit Compact indent no longer matches the profile fails the build (no
+    # silent regression).
+    compact_cfg = tables_cfg.get("cell_first_line_indent_chars", 0)
+    compact_block = _style_block(styles, "Compact")
+    _cm = re.search(r'w:firstLineChars="(\d+)"', compact_block)
+    if _cm is None:
+        notes.append({"check": "compact_first_line_chars",
+                      "value": None,
+                      "status": "stale_pre_fix_artifact_inherits_normal_indent",
+                      "expected": int(round(compact_cfg * 100))})
+    else:
+        check("compact_first_line_chars", int(round(compact_cfg * 100)), int(_cm.group(1)))
+
     # ── GC-2026-1112-01: heiti weight / abstract-label alignment / citation
     # superscript. When the profile states a dimension, the artifact must carry
     # it; when it does not, the dimension is skipped (never a silent pass).

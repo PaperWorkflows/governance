@@ -207,6 +207,27 @@ def _drop_citation_superscript(doc: bytes) -> bytes:
     return (text[:m.start()] + new_run + text[m.end():]).encode("utf-8")
 
 
+def _restore_compact_indent(styles: bytes) -> bytes:
+    """Re-impose the inherited 2-char first-line indent on Compact (mutation: the
+    profile declares cell indent 0). Pre-fix artifacts carry no explicit Compact
+    w:ind (they inherit through BodyText -> Normal), so this injects one; the
+    regenerated form already has firstLineChars="0", which must be flipped to 200.
+    Either way the resulting Compact no longer matches tables.cell_first_line_indent_chars."""
+    text = styles.decode("utf-8")
+    m = re.search(r'<w:style [^>]*w:styleId="Compact"[^>]*>.*?</w:style>', text, re.S)
+    if not m:
+        raise AssertionError("no Compact style block")
+    block = m.group(0)
+    if re.search(r'w:firstLineChars="(\d+)"', block):
+        new_block = re.sub(r'w:firstLineChars="\d+"', 'w:firstLineChars="200"', block, count=1)
+        if new_block == block:
+            raise AssertionError("Compact carries no firstLineChars to mutate")
+    else:
+        ppr = block.rindex("</w:pPr>")
+        new_block = block[:ppr] + '<w:ind w:firstLineChars="200" w:firstLine="400"/>' + block[ppr:]
+    return (text[:m.start()] + new_block + text[m.end():]).encode("utf-8")
+
+
 def section_d(paper_root: pathlib.Path) -> None:
     """Negative tests: removing profile values from the artifact must fail the build."""
     import importlib.util
@@ -283,6 +304,10 @@ def section_d(paper_root: pathlib.Path) -> None:
         # GC-2026-1112-01: every in-text citation run must be superscripted
         "citation_superscript_removed": lambda p: p.__setitem__(
             "word/document.xml", _drop_citation_superscript(p["word/document.xml"])),
+        # GC-2026-1112-06 follow-up (表单元格缩进归零): restoring the 2-char indent on
+        # pandoc Compact (table cells / tight lists) must fail the landing assertion
+        "compact_indent_restored": lambda p: p.__setitem__(
+            "word/styles.xml", _restore_compact_indent(p["word/styles.xml"])),
     }
     if header_mode == "none":
         # M3-b / P1-c-1: a header=none artifact must carry NO w:headerReference.

@@ -690,6 +690,17 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
                                 "space_before_pt": p.get("spacing_before_pt", 0),
                                 "space_after_pt": p.get("spacing_after_pt", 0),
                                 "line_spacing": role["line_spacing"]})
+    # GC-2026-1112-06 follow-up fix (表单元格缩进归零): pandoc's Compact style (table
+    # cells + tight lists) is basedOn BodyText -> Normal, and Normal carries
+    # w:firstLineChars="200" (the correct body indent). Compact itself has no w:ind,
+    # so every table-cell / tight-list paragraph inherits the 2-char body indent —
+    # against the template, whose table text sits flush (范本表内文字顶格). Rewrite
+    # Compact's indent explicitly from tables.cell_first_line_indent_chars (default
+    # 0) so the override lands without touching body-style paragraphs.
+    compact_indent = (role["tables"] or {}).get("cell_first_line_indent_chars", 0)
+    styles = _patch_style(styles, "Compact",
+                          ppr={"first_line_chars": compact_indent,
+                               "first_line_pt": 0})
     styles = _patch_style(styles, "Title",
                            rpr={"fonts": f["title"], "size_pt": s.get("title_zh"), "black": True},
                            ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,
@@ -892,6 +903,15 @@ def self_check(data: bytes, role: dict) -> dict:
     m = re.search(r'w:firstLineChars="(\d+)"', normal)
     checks["normal_first_line_chars"] = int(m.group(1)) / 100 if m else None
     checks["normal_first_line_chars_expected"] = role["first_line_indent_chars"]
+    # GC-2026-1112-06 follow-up fix (表单元格缩进归零): Compact (table cells + tight
+    # lists) must explicitly carry the profile's cell indent instead of inheriting
+    # Normal's 2-char body indent through BodyText. This makes sure a future refdoc
+    # regeneration cannot silently drop the override.
+    compact = style_block("Compact")
+    m = re.search(r'w:firstLineChars="(\d+)"', compact)
+    checks["compact_first_line_chars"] = int(m.group(1)) / 100 if m else None
+    checks["compact_first_line_chars_expected"] = (role["tables"] or {}).get(
+        "cell_first_line_indent_chars", 0)
     m = re.search(r'<w:pgSz w:w="(\d+)" w:h="(\d+)"', docxml)
     w_tw = int(m.group(1)) if m else 0
     h_tw = int(m.group(2)) if m else 0
@@ -964,6 +984,7 @@ def self_check(data: bytes, role: dict) -> dict:
         and checks["abstract_title_alignment"] == checks["abstract_title_alignment_expected"]
         and checks["table_caption_bold"] == checks["table_caption_bold_expected"]
         and checks["normal_first_line_chars"] == checks["normal_first_line_chars_expected"]
+        and checks["compact_first_line_chars"] == checks["compact_first_line_chars_expected"]
         and checks["page_mm"] == checks["page_mm_expected"]
         and checks["margins_mm"] == margins_expected
         and checks["no_blue_headings"]
