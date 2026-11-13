@@ -2779,6 +2779,13 @@ FIGURE_INK_THRESHOLD = 250     # 8-bit gray below this counts as ink
 FIGURE_RENDER_DPI = 150        # slot-region render resolution
 CAPTION_MATCH_CHARS = 12       # normalized caption prefix used to locate the
                                 # caption line in the PDF text layer
+CAPTION_TOP_TOLERANCE_PT = 6.0  # page-top clearance a caption candidate must
+                                # leave for the figure above it: a candidate
+                                # whose implied figure top edge falls within
+                                # this margin of the page top cannot be the
+                                # real caption — the figure would not fit on
+                                # the page above it (P2 fig4's in-image title
+                                # matches the caption text ~254pt too high)
 
 
 class FigureToolUnavailable(Exception):
@@ -3053,14 +3060,45 @@ def _figure_text_intrusion_applicable(figures_dir: Path, ref: str) -> bool:
     return False
 
 
-def _locate_caption_line(lines: list, caption_text: str, used: set) -> dict | None:
+def _locate_caption_line(lines: list, caption_text: str, used: set,
+                         figure_height_pt: float | None = None,
+                         page_height_pt: float | None = None) -> dict | None:
     """Find a figure's caption line in the PDF text layer.
 
     The caption text comes from the docx (pandoc's implicit-figure caption,
-    which sits directly UNDER the figure). The FIRST occurrence in reading
-    order is the real caption: body-text look-alikes ("如图1所示…") never
-    carry the caption's own wording, and a paper that repeats its caption
-    as a body paragraph (P3 does) repeats it AFTER the pandoc caption.
+    which sits directly UNDER the figure). The scan stays FIRST-match in
+    reading order, with one geometric admission test per candidate:
+
+    Geometry rule — a real caption has the whole figure ABOVE it on the same
+    page, so the figure's top edge (candidate y0 minus the docx figure
+    height and the region gap) must clear the page top by at least
+    CAPTION_TOP_TOLERANCE_PT. A candidate that fails this is skipped and the
+    scan continues. If NO candidate passes (e.g. the caption opens a page
+    with its figure on the previous one, or the figure is taller than the
+    page), the first text-matching candidate is returned — the pre-geometry
+    behavior — so the slot assertion still runs instead of silently
+    disappearing.
+
+    Why first-match-plus-geometry, and not last-match: a paper that repeats
+    its caption as a body paragraph (P3 does) repeats it AFTER the pandoc
+    caption, so a last-match rule would anchor P3's slot on body text. Why
+    the geometric admission is needed at all: a figure whose SVG carries the
+    caption wording as an in-image title (P2 fig4 does — "图4 主方案与消融在
+    关键指标上的对照…" drawn at the top of its chart canvas) matches the
+    caption prefix BEFORE the real caption in reading order. On P2 fig4 the
+    in-image title sits at y≈203.9pt while the docx extent is 249.4pt tall:
+    its implied figure top edge would be ≈ −50pt (off the page top), so it is
+    skipped and the scan reaches the real caption at y≈457.8pt (implied top
+    ≈ 204pt). P3's repeat is later in reading order, so its real caption
+    remains the first candidate that passes geometry — both papers anchor
+    correctly under the same rule.
+
+    page_height_pt (when given, the caller passes the document's uniform page
+    height) only guards the fit precondition: if the figure plus the region
+    gap cannot fit on a single page at all, the top-edge test would reject
+    every candidate, so it is disabled and the first text-matching candidate
+    is returned. The top-edge comparison itself is against the page top
+    (y=0 in the bbox), which needs no page height.
     """
     def norm(s: str) -> str:
         return re.sub(r"\s+", "", s)
@@ -3068,12 +3106,26 @@ def _locate_caption_line(lines: list, caption_text: str, used: set) -> dict | No
     prefix = norm(caption_text)[:CAPTION_MATCH_CHARS]
     if len(prefix) < 2:
         return None
+    geometry_live = (figure_height_pt is not None
+                     and (page_height_pt is None
+                          or figure_height_pt + FIGURE_REGION_GAP_PT < page_height_pt))
+    first_idx = None
     for i, ln in enumerate(lines):
         if i in used:
             continue
-        if norm(ln["text"]).startswith(prefix):
-            used.add(i)
-            return ln
+        if not norm(ln["text"]).startswith(prefix):
+            continue
+        if first_idx is None:
+            first_idx = i
+        if geometry_live:
+            top_edge = ln["y0"] - figure_height_pt - FIGURE_REGION_GAP_PT
+            if top_edge < CAPTION_TOP_TOLERANCE_PT:
+                continue  # the figure cannot fit above this candidate on its page
+        used.add(i)
+        return ln
+    if first_idx is not None:
+        used.add(first_idx)
+        return lines[first_idx]
     return None
 
 
@@ -3263,7 +3315,12 @@ def _verify_pdf_figures(pdf_path: Path, docx_path: Path, figure_refs: list, figu
             entry["status"] = "caption_absent"
             result["notes"].append(f"figure {idx + 1} ({ref}): no caption paragraph in the docx; region check skipped")
             continue
-        cap = _locate_caption_line(lines, fig["caption"], used_lines) if lines else None
+        # GC-2026-1113-02: the figure height and page height arm the geometry
+        # admission in _locate_caption_line, so an in-image title that repeats
+        # the caption wording (P2 fig4) cannot hijack the slot anchor.
+        cap = (_locate_caption_line(lines, fig["caption"], used_lines,
+                                    fig["height_pt"], lines[0]["page_h"])
+               if lines else None)
         if cap is None:
             entry["status"] = "caption_unlocated"
             entry["detail"] = "caption text not found in the PDF text layer"

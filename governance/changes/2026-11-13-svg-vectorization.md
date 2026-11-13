@@ -132,6 +132,42 @@ PF-B12 新增一条（GC-2026-1113-02）：插图在 **docx 与 PDF 两级**验�
 - **行数订正**：§3 头部原记"净 +553/−55 行"系 `3259220` 实测误记；`git diff dc3e658 3259220 -- tools/paper.py` 实测为 **+586/−55**（本节订正；§3 表内函数级清单内容不变）。
 - **审计注记（论文侧 build-record.md 带入他线未提交节）**：P1 仓库提交 `b39837a`（2026-11-13 14:47:37 +0800）的 build-record.md 除本变更的 GC-2026-1113-02 节外，还带入了另一条工作线**当时未提交**的「PKG-v0.4.10 · 投稿交付包组装（2026-11-13 14:31:27 +0800）」节。经核对：两节内容**均完整、无丢失**（GC 节自 build-record.md L1912 起、PKG 节自 L1862 起，各节数字与 manifest/产物一致），该 PKG 节非本变更产出但已随 `b39837a` 入库。提交信息无法追改，特此在治理记录补痕；论文侧后续整理不得删除该节。
 
+## 12. 题注定位器几何修正 + P5 fig2 定尺修复（2026-11-13，独立核验发现）
+
+§11 缺陷修正后，独立核验（agent-step-5）对 §4 C 段"题注定位"环节实测发现第二项缺陷：`_locate_caption_line` 只按"阅读顺序首个匹配"取题注，未校验图幅几何——**题注行文字出现在图内**时定位器会被带偏。
+
+### 12.1 缺陷实例（P2 fig4）
+
+P2 `figures/fig4-ablation.svg` 图内顶部绘有与题注全文相同的图内标题（"图4 主方案与消融在关键指标上的对照（构造基准，n=60 场景）"，SVG y=30，font-size 16 加粗），该文字进入 PDF 文本层后排在真实题注之前：图内标题 y=203.9pt，真实题注 y=457.8pt（均第 22 页）。定位器取首匹配命中图内标题，图幅区间 [0.0, 203.9]（上沿被 `max(0,…)` 截断）测的是注文区而非图位——墨色断言被带偏（0.0782，非空故未漏放，drawing 计数闸亦确认图在）。人工补测真实图位墨比 14.61%，证实图在位、仅断言锚点错。
+
+### 12.2 修正（`tools/paper.py`，最小改动）
+
+`_locate_caption_line` 引入图高与页高参数（调用方 `_verify_pdf_figures` L3266 处已有 `fig["height_pt"]`，页高取 `lines[0]["page_h"]`），新增常量 `CAPTION_TOP_TOLERANCE_PT = 6.0`：
+
+- **规则**：按阅读顺序遍历候选匹配行；对每个候选计算图幅区间上沿 = 候选行 y0 − 图高 − `FIGURE_REGION_GAP_PT`；**上沿 < 6pt（顶出页顶容差，即图放不进候选行上方的页面空间）则跳过该候选**；第一个通过几何校验的候选即为真实题注；全部候选都不通过（如题注在页首而图在上一页，或图高于页高）时回退首个文本匹配候选，保持旧行为、断言不失效；图高 + gap ≥ 页高时几何校验自动让位（对单页放不下的图无意义）。
+- **为何不能改成"取最后一个匹配"**：P3 的题注在 pandoc 题注段之后还有正文重复（docstring 原载此场景），取末会破坏 P3。
+- **为何该规则对两个实例同时成立**：P2 fig4 图内标题在真实题注上方约 254pt，图高 249.4pt——图内标题隐含的图幅上沿 ≈ −50pt（顶出页顶）被跳过，真实题注隐含上沿 ≈ 204pt 通过；P3 的正文重复在真实题注**之后**，真实题注仍是首个通过几何校验的候选，行为不变。
+- docstring 已按新规则与两个实例重写；不改其他断言逻辑、不改 manifest 结构。
+
+### 12.3 复验矩阵（探针 `/tmp/capprobe/probe.py`，`python3 -I`，不跑 soffice，全部对现行 PDF 直跑 `_verify_pdf_figures`）
+
+| 对象 | 结果 |
+|---|---|
+| P2 v0.4.11 fig4 | 锚点 **203.9 → 457.8pt**（真实题注），区间 [0.0, 203.9] → [204.4, 457.8]，ink 0.0782 → **0.1463**（人工补测参考 14.61% 同量级，非空且过 0.01 闸） |
+| P2 fig1-3 | 逐项不变（472.0/0.3496、471.4/0.2151、441.3/0.1646） |
+| P1 v0.4.11 三图 | 与 manifest 逐项一致：ink 0.3766/0.1488/0.0878、pages [5,10,11]、blank []，零误杀 |
+| P3/P4/P5/P6/P7 | 全部图位锚点、ink、pages_checked 零漂移（P3 题注后重复场景回归不破） |
+| 负例 `/tmp/svgverify/neg2w.pdf`（P1 派生，第 5 页空图位） | 仍 **fail**（ink 0.0000 < 0.01），仍精确钉在 fig1；同 PDF 的 fig2/fig3 仍 pass，无误杀 |
+| `python3 -I tools/paper.py check --paper …/P2-LAYERGOV-20251110` | pass（退出码 0） |
+| `python3 -I tools/verify_layout.py` | 27 PASS / 0 FAIL |
+
+### 12.4 P5 fig2 定尺修复（论文侧）
+
+- **根因**：P5 fig2 引用由 .png 切 .svg 后，pandoc 对 PNG 按 pHYs（15000px/m ≡ 381dpi）定尺得 16.0×7.0cm（低于版心上限故保持），对 SVG 按 96dpi/声明宽估算（2400px → 63.5cm）触达版心上限 16.969cm（高 7.424cm）——展示尺寸偏离原设计 0.969cm（纵横比、页数、裁切均不变）。P5 build-record.md 上一轮 §3 已留"待该线裁定"开放项，本轮落地。
+- **修复**：`body/paper.md` 与 `body/05-state-governance.md` 的 fig2 引用追加 `{width=16cm}`（项目既有显式宽度写法，P4 同款约定），题注文字一字未动；fig1/fig3 本就触达上限，不动。
+- **重建与验证**（同版本 v0.4.11，soffice 单次运行，运行前确认无并发）：docx `wp:extent` **16.969×7.424 → 16.000×7.000cm**（偏差 0.000cm，与切换前 PNG 一致）；`pdfimages -list` 图幅级栅格 **0**；`pdffonts` 13/13 嵌入；页数 16→16；第 9 页 300dpi 渲染矢量清晰无裁切；`layout.figures.pdf` status=pass（fig2 cap_top 459.3→447.3，ink 0.2978；fig1/fig3 不变）；layout_assertions/figure_assertions pass。论文侧提交 `b08aaf1`（P5 仓，三文件：body/paper.md、body/05-state-governance.md、build-record.md；build-record.md 整文件提交，diff 仅本轮追加节，无他线未提交内容带入）。
+- **rules_version**：保持 0.3.0——本项为 §4 C 段既有 PF-B12 语义内的定位精度修正（不新增/放宽任何断言）加论文侧定尺，无 schema/profile 改动，理由同 §9。
+
 ---
 
-*GC-2026-1113-02。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B2/PF-B3/PF-B6/PF-B7/PF-B12/PF-B15；规则版本 0.3.0；计划 temp/svg-vector-plan.md（v0.1，改号前为 GC-2026-1113-01）+ agent-gpt-plus 独立审查七项修正闭合；论文侧明细见 P1 build-record.md（GC-2026-1113-02 节，提交 b39837a）；独立核验后 P1 缺陷修正（poppler 工具缺失闸）与审计注记见 §11。*
+*GC-2026-1113-02。规则依据：AGENTS.md F9/F5/F6；版式依据 governance/build.md PF-B2/PF-B3/PF-B6/PF-B7/PF-B12/PF-B15；规则版本 0.3.0；计划 temp/svg-vector-plan.md（v0.1，改号前为 GC-2026-1113-01）+ agent-gpt-plus 独立审查七项修正闭合；论文侧明细见 P1 build-record.md（GC-2026-1113-02 节，提交 b39837a）；独立核验后 P1 缺陷修正（poppler 工具缺失闸）与审计注记见 §11；题注定位器几何修正复验矩阵与 P5 fig2 定尺修复见 §12。*
