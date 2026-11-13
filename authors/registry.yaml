@@ -3,7 +3,7 @@
   name_en: Author A
   affiliations:
   - 云南省自然资源厅<单位已脱敏>
-  email: <邮箱已脱敏>  # 用户更新 2026-11-12（原 <邮箱已脱敏>）
+  email: <邮箱已脱敏>  # 用户 2026-11-12 最终确认（189.cn 作废）；论文通讯邮箱统一此地址，源头见 PaperWorkflows/authors.txt
   orcid: null
   git_name: janssenkm
   git_email: janssenkm@users.noreply.github.com
