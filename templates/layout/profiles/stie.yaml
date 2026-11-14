@@ -151,6 +151,7 @@ citation:
     en_multi: "(Smith et al., 2020)"    # et al.
     same_author_same_year_suffix: "a/b/c"  # 年份后加 a、b、c
     repeat_citation_page: "superscript"    # 出版年后角标著录引文页码
+    joint_corporate_separator: "、"        # [SC] 联合团体著者间分隔（如"中共中央、国务院"）：刊方 S14 未规定团体著者形态 → 本项目自选回落（官方文件联合署名惯例用顿号；P3/P8 现状实践）。自然人双著者仍按 S14① 用"和"，本键不改变自然人规则。条目级联合著者仍按 GB/T 7714 逗号分隔（P8 L385–389、P9 L232/L276 条目实证），本键仅辖文内引注形态（GC-2026-1114-02）
   # 在线法律/政策文本：按刊方④[EB/OL] 模板著录（[S16]）：
   #   {author}, {year}. {title}[EB/OL]. （{update_date}）[{access_date}]. 网址：{url}.
   # 交叉引用刊方模板、不重复登记（单一真值源；GC-2026-1114-01）。

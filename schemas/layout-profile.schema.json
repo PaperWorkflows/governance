@@ -306,7 +306,8 @@
             "en_double":   { "type": "string" },
             "en_multi":    { "type": "string" },
             "same_author_same_year_suffix": { "type": "string", "description": "e.g., a/b/c after year" },
-            "repeat_citation_page":         { "type": "string", "description": "superscript page after year" }
+            "repeat_citation_page":         { "type": "string", "description": "superscript page after year" },
+            "joint_corporate_separator":    { "type": "string", "description": "Separator between joint corporate (institutional) authors in Chinese in-text citations, e.g., the 、 in 中共中央、国务院 (venue S14 covers natural-person forms only; project fallback per official-document joint-signature convention and P3/P8 current practice; natural-person double authors keep 和 per S14). GC-2026-1114-02." }
           }
         },
         "fallback_entry_forms": {
