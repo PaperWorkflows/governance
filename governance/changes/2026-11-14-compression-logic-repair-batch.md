@@ -330,3 +330,9 @@ P9 bib 侧单独处理：
 
 - 早前记录（2026-11-13-metadata-driven-layout.md §9 第14项）曾建议“批次统一为注册表定稿译名”。本轮查实：该建议**已被 2026-11-14 用户裁定取代**——P2 `authors.yaml` 头部注记载明「a1 <单位已脱敏> → Yunnan Mapping Institute（2026-11-14 用户裁定：去掉二级部门名）」「a2 … → Land and Resources Information Center, Yunnan Department of Natural Resources（P2 自稿原文）……按指令『勿抄 P5』保留 P2 自稿译名」；P3 同属“取自 P3 自稿原文”的同一收割原则（`Information Center of Land and Resources, Department of Natural Resources of Yunnan Province`）；P5 用自稿形 `Yunnan Institute of Surveying and Mapping` / `Land and Resources Information Center, Department of Natural Resources of Yunnan Province`（P1 11-13 确认的注册表参照形）。
 - **结论：跨篇译名差异属用户已裁定的“各篇保留自稿译名”状态，不是待修缺陷**；后续轮次不得以“统一译名”为由改写 P2/P3（PF-W1：主张-证据关系与作者裁定优先于批次美观）。若用户日后改令统一，以本附注为翻转记录点。
+
+### 附注三：普通技术资料不入参考文献、不加引用标记（2026-11-15 用户政策裁定）
+
+- 用户裁定（2026-11-15）：**普通技术资料（内部技术方案、单位内部实践、未公开资料等）可在正文以自然语言提述，但不进参考文献、不加引用标记**。先例：P7 压缩轮已按此办理（删「内部技术团队（2026）」条目，两处提述改为“内部技术团队 2026 年提出的……”非引用表述）。
+- 2026-11-15 全批复核（九篇）：①参考文献节零条技术资料类条目（P2/P5 财政部条目为法规[Z]、P9 吴源源条目为期刊论文[J]，均不属此类）；②文内引用标记零条指向技术资料；③现存自然语言提述全部无引用标记——P7×2（L9/L76 内部技术团队技术方案）、P4×3（L7/L49/L335 作者单位内部实践）、P3×1（L141 内部技术说明）。
+- 纪律：后续轮次不得以“补充文献”为由为上述提述添加条目或引注；新增普通技术资料提述一律照此办理。
