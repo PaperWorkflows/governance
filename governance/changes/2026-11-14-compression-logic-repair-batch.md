@@ -355,3 +355,9 @@ P9 bib 侧单独处理：
 
 - 九篇当前版本按 PF-B16 约定补齐投稿 zip（结构：docx+pdf+manifest.json+figures/+tables/ 平铺，同历史投稿 zip）。验证：zip 内 docx/pdf/manifest 与各自 `build/<version>/package/` 逐字节一致；P1/P7/P8/P9 最新修订在 zip 内 docx 探针确认（三主张例/业务状态术语限定句/“尚待积累”/“协同感知网络”）。zip 为构建产物不入库，九篇 build-record 各有一条就绪记录。
 - 至此投稿四件套齐备：稿件（docx/pdf）+ 图表（figures/tables）+ manifest + zip；四层门禁（内容/结构/渲染/版本）全绿。**发送（F7）待用户指令**；截稿 2026-11-20。
+
+### 附注七：schema 偏离全貌与一处待治理决策的分歧（2026-11-15）
+
+- 全量复跑 `paper.schema.json` 校验：P5/P9 通过；P1/P2/P3/P6 各 1 项（`budget.confirmed=false`，paper.yaml 载明用户决策项不得擅改）；P4 四项、P7 九项、P8 五项——**全部为改动前既有、已在各篇 build-record 逐项登记（“未修复、未阻断构建”），`paper.py check` 九篇均 pass**。
+- **待治理层决策的分歧**：P4（1 条）/P7（7 条）/P8（3 条）的 `unresolved` 用对象型条目（`{item, owner, target}`，承载责任人与时限，信息量高于纯字符串），与 schema `unresolved.items.type=string` 冲突；P1/P2/P3/P5/P6/P9 用字符串条目。两条路：①schema 放宽为 `oneOf[string, object{item,owner,target}]`（保留富结构信息，PATCH）；②三篇规范化为字符串（丢 owner/target 或折成文本）。**倾向 ①**（信息不丢、与实践一致）；待 GC 立项裁定，本轮不动。
+- 结论：无未登记偏离，无阻断项；投稿就绪状态不变。
