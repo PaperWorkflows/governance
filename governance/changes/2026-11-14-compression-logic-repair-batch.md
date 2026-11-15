@@ -325,3 +325,8 @@ P9 bib 侧单独处理：
 - **终审执行**：按 PF-PL13 S1–S20 对九篇做投稿前合规 sweep（`.review_scratch/presubmission-audit-20261114.md`），报告 172 项发现。控制面逐项复测后**仅 2 项为真**：P8 中文摘要 439、P9 中文摘要 414 非空白字符，均超 writing-spec `abstract_max_chars: 400`。其余 170 项为审计方口径/解析错误，已在报告附"控制面复核与处置"节逐类驳回并留证：S20（计数 Scope 错误——权威口径九篇 14784–14999 全部 <15000）、S04（关键词行解析错误——P7/P8/P9 实为 7/7、7/7、3/3 且中英对应）、S12（九篇末章均为"结语"）、S07（基金块由 metalayout 构建期自 funding.yaml 生成，P1 docx 实测含"基金项目"行；按 PF-PL13 题录去重纪律不得写入正文）、S06（未识别行内释义与 locked 登记形）、S16（脱离印出形态仅凭 bib 字段套模板；S15/S16 已由晨 refs-audit 按 GB/T 7714 版次口径逐条分类）、S08（文后文献/附录不编号是出版惯例且属本批章结构保全项）、S01（历史已登记待编辑部确认项）。
 - **摘要修复**（执行乙＋核验丙，`.review_scratch/abstract-fix-verify-20261114.md`）：P8 `439→397`（fbe4584+dc15484，v0.1.7）、P9 `414→397`（5f50f4f+e97c781，v0.1.4）。P9 首轮压缩出现术语削损（"感知基/代理/技术边界/协同感知网"及逗号粘连），控制面驳回后以原文措辞最小下刀（仅删"人群/经/识别/典型"及三处连接词与一处括定），术语语法全部复位；两篇全部数字/机制/边界句逐一保全，中英 PF-W2 五项一致，第三人称 0 命中，正文零改动；产物按 PF-B7 重建，strict A1–A5 全 pass。
 - **终态**：九篇 body_chars 14784–14999（<15000）、摘要 369–397（∈[300,400]）、check 九篇 pass、strict 九篇 ok、工作树九篇 dirty=0。
+
+### 附注二：英文单位译名跨篇差异的裁定状态（2026-11-15 查实）
+
+- 早前记录（2026-11-13-metadata-driven-layout.md §9 第14项）曾建议“批次统一为注册表定稿译名”。本轮查实：该建议**已被 2026-11-14 用户裁定取代**——P2 `authors.yaml` 头部注记载明「a1 <单位已脱敏> → Yunnan Mapping Institute（2026-11-14 用户裁定：去掉二级部门名）」「a2 … → Land and Resources Information Center, Yunnan Department of Natural Resources（P2 自稿原文）……按指令『勿抄 P5』保留 P2 自稿译名」；P3 同属“取自 P3 自稿原文”的同一收割原则（`Information Center of Land and Resources, Department of Natural Resources of Yunnan Province`）；P5 用自稿形 `Yunnan Institute of Surveying and Mapping` / `Land and Resources Information Center, Department of Natural Resources of Yunnan Province`（P1 11-13 确认的注册表参照形）。
+- **结论：跨篇译名差异属用户已裁定的“各篇保留自稿译名”状态，不是待修缺陷**；后续轮次不得以“统一译名”为由改写 P2/P3（PF-W1：主张-证据关系与作者裁定优先于批次美观）。若用户日后改令统一，以本附注为翻转记录点。
