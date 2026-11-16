@@ -63,11 +63,12 @@
 
 | # | 验证项 | 方法 | 结果 |
 |---|---|---|---|
-| a | 当前树 PII | 19 类模式 `grep -rl`（排除 `.git/`、`temp/`） | 零命中 |
+| a | 当前树 PII | 23 类模式 `grep -rl`（排除 `.git/`、`temp/`） | 零命中 |
 | b | 结构完整 | `py_compile` 四个工具 + `paper.py validate` + `build docx` | 全部通过 |
-| c | 历史重写 | `git filter-repo --replace-text` 后 `git clone --no-local` 新仓，全历史复扫 19 类模式 | 零命中 |
-| d | 远端一致 | force push 后经 `gh api` 取远端默认分支树复扫 | 零命中 |
-| e | 重新公开 | 仅当 c/d 均零命中后执行 `private=false` | 见执行记录 |
+| c | 历史 blob | `git filter-repo --replace-text`（23 条规则）后全新克隆，逐提交 `git grep` 复扫 | 零命中 |
+| d | 历史提交信息 | `filter-repo --message-callback`（replace-text 不清提交信息，需单独回调）后复扫 | 零命中 |
+| e | 远端一致 | force push 后 `git clone git@github.com:...` 复扫 blob + 提交信息 + 标签 | 22 类模式零命中 |
+| f | 重新公开 | 仅当 c/d/e 均零命中后方可执行 `private=false` | **未执行**，待用户裁定（见 §8） |
 
 ## 6. 风险与处置
 
@@ -82,3 +83,15 @@
 
 - 本地重写前状态：重写前以 `git bundle create` 全量备份；重写命令与映射表见 §2/§3。
 - 远端：重新公开用 `gh api -X PATCH repos/PaperWorkflows/governance -f private=false`；回退到暴露状态（不推荐）直接执行同一命令即可。
+
+## 8. 执行记录与待裁定事项（2026-11-16）
+
+已执行：止血（转私有）→ 当前树脱敏（9 个被跟踪文件）→ `authors/registry.yaml` 占位化 → 历史 blob 重写（`--replace-text`，23 条规则）→ 提交信息重写（`--message-callback`，首轮 `--commit-callback` 因传入完整函数定义而空转，已改为函数体形式生效）→ force push → 远端复扫零命中。
+
+**踩坑记录**（供后续复用）：`--replace-text` 的分隔符是 `==>`（三字符），写成 `===>` 会使匹配串多带一个 `=` 而全部落空；`--replace-text` 不处理提交信息，须另用 `--message-callback`；回调参数是函数体而非完整函数定义。
+
+**待用户裁定**：治理仓当前为 private。重新公开前需知悉两点——
+1. **连带影响**：9 个论文仓的 CI 工作流第 2 步 `actions/checkout` 拉取 `PaperWorkflows/governance`；治理仓为私有时该步会因默认 `GITHUB_TOKEN` 无权跨仓拉取而失败。要么重新公开治理仓，要么在 9 个私有仓各配一个可读治理仓的 PAT secret。
+2. **缓存残留**：force push 后旧对象在 GitHub 侧短期内仍可能经 SHA 直接访问，建议保留私有观察一段时间；如需彻底清除需联系 GitHub Support。
+
+本地备份：重写前全量 bundle 存于工作副本 `/tmp/governance-pre-redaction.bundle`（512 KB，含重写前 61 个提交）。
