@@ -825,9 +825,9 @@ def _bio_reduced(author: dict, meta: dict, authors_profile: dict) -> str:
 
 
 def _bio_corresponding(author: dict, meta: dict, authors_profile: dict) -> str:
-    """Corresponding-author simple bio (范本 §8 简式八字段, P2-4 终审返工).
+    """Corresponding-author full bio（刊方 S17 全 11 项, GC-2026-1117-03 补全籍贯/学位/职称分支）.
 
-    与首作者全字段（_bio_full）不同：无籍贯/学位/职称；电子邮箱、电话在通信地址
+    与首作者全字段（_bio_full）一致，含籍贯/学位/职称；电子邮箱、电话在通信地址
     之前；通信地址与邮政编码合写为「通信地址：<addr>，邮政编码 <pc>」（邮政编码后
     无冒号）。字段表由 profile bio_section.corresponding_bio_fields 给定，缺省回落
     CORRESPONDING_BIO_FIELDS。
@@ -847,6 +847,18 @@ def _bio_corresponding(author: dict, meta: dict, authors_profile: dict) -> str:
                 inline.append(f"（{v} 年生）")
         elif field == "性别":
             v = bio.get("gender")
+            if v:
+                inline.append(f"，{v}")
+        elif field == "籍贯":  # GC-2026-1117-03 补全：stie.yaml 已含全 11 项，渲染器缺籍贯/学位/职称
+            v = bio.get("hometown")
+            if v:
+                inline.append(f"，{v}人")
+        elif field == "学位":  # GC-2026-1117-03 同上
+            v = bio.get("degree")
+            if v:
+                inline.append(f"，{v}")
+        elif field == "职称":  # GC-2026-1117-03 同上
+            v = bio.get("title")
             if v:
                 inline.append(f"，{v}")
         elif field == "单位":
