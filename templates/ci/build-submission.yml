@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     name: build docx / pdf / package / zip
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout paper repository
         uses: actions/checkout@v4
@@ -41,19 +41,25 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system dependencies (LibreOffice / CJK fonts / pinned pandoc)
+      - name: Install system dependencies (LibreOffice / CJK fonts)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk
-          # pandoc 固定 3.9：参考 docx 由 pandoc 默认 reference.docx 生成，版本不同则
-          # 字节不同，会触发 PF-B11 refdoc 同步校验失败（GC-2026-1116-01 记录）。
-          curl -sSL -o /tmp/pandoc.deb "https://github.com/jgm/pandoc/releases/download/3.9/pandoc-3.9-1-amd64.deb"
-          sudo apt-get install -y /tmp/pandoc.deb
-          pandoc --version | head -1
           soffice --version | head -1
 
       - name: Install Python dependencies
-        run: python -m pip install --upgrade pip pyyaml jsonschema
+        run: python -m pip install --upgrade pip pyyaml jsonschema pypandoc-binary
+
+      # pandoc 用 pypandoc-binary 的捆绑二进制：与本地构建所用二进制同源同版本，
+      # 保证 --print-default-data-file reference.docx 与 PF-B11 refdoc 同步校验基线一致
+      # （官方 deb 构建在 CI 上的 SVG→PNG 回退行为与本地不一致，2026-11-16 实测）。
+      - name: Pin pandoc (pypandoc-binary)
+        run: |
+          PANDOC_BIN="$(python -c 'import pathlib, pypandoc; print(pathlib.Path(pypandoc.__file__).parent / "files" / "pandoc")')"
+          echo "bundled pandoc: $PANDOC_BIN"
+          "$PANDOC_BIN" --version | head -1
+          echo "$(dirname "$PANDOC_BIN")" >> "$GITHUB_PATH"
+          pandoc --version | head -1
 
       # PF-PL1 准入校验为咨询步骤：budget.confirmed 等字段属用户决策项（各篇 paper.yaml
       # unresolved 已登记"不得擅改"），本地构建流程同样不以其为阻断，故 CI 不阻断；
