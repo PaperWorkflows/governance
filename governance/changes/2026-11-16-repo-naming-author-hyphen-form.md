@@ -133,3 +133,13 @@ GitHub 论文仓名 = P{N}-{TITLE_EN}-{FIRST_AUTHOR_EN}
 | # | 项 | 说明 |
 |---|---|---|
 | ⑤ | 模板与代码中残留 8 处 `PaperWorkflows/instruction` 引用 | `templates/paper/AGENTS.md:4/16/17`、`templates/paper/README.md:14/86`、`tools/paper.py:627`（proposal 写入 AGENTS.md）、`tools/paper.py:922`（check 验证 expected_ref）、`SKELETON-PLAN.md:77`。迁移需连带存量 10 篇论文工作区的 AGENTS.md 更新，建议后续轮次一并提供迁移方案后处理。 |
+
+---
+
+## 执行结果（2026-11-16）
+
+- P1–P9 共 9 个论文仓已由 `derive_repo_name` 从各仓本地 `paper.yaml`/`authors.yaml` 现场派生并执行 `gh repo rename` 改为连字符作者形式：9/9 成功，`gh repo view` 与 `git ls-remote origin HEAD` 逐仓实测可达，全部 ≤100 字符（主会话另抽验 P1/P6/P9 三仓复核一致）。
+- 中间态已清理：GC-1116-06 括号形式被 GitHub 静默替换产生的 mangled 仓名（`--AUTHOR-` 形式）随本轮改名消除；验证用临时测试仓已删除。
+- P10 按用户 2026-11-16 裁定暂缓：未派生、未改名，本地 origin 保持 `P10-ONEMAP-20261116.git`。
+- 旧—新仓名完整映射与逐仓验证记录按隐私基线不落本仓，存于本地运维日志（仓库外）；映射可由各论文仓本地元数据经 `derive_repo_name` 随时复现。
+- 随仓名自动跟随项无需处置：`pack_submission_zip.py` 的 zip 名与 CI 工作流均自 origin / `github.event.repository.name` 取仓名。
