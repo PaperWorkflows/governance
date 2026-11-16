@@ -112,7 +112,7 @@ poppler-utils 依赖修复后，docx/pdf/snapshot/package/strict 各步骤全部
 ## 7. 待办事项
 
 1. **其余论文仓 `.github/workflows/build-submission.yml` 同步**：P5 已修改，其余论文仓需跟进同步 librsvg2-bin 与 poppler-utils 两项安装。
-2. CI 全链路（docx → pdf → snapshot → package → strict → layout → zip）转绿后关闭本轮修复。
+2. ~~CI 全链路（docx → pdf → snapshot → package → strict → layout → zip）转绿后关闭本轮修复。~~ **已于 2026-11-16 关闭**：重跑运行 43884030588 全 16 步成功，submission-zip 工件产出并经字节级验证包含修复后的图 1（见 §8 行 h）。
 
 ## 8. 验证
 
@@ -125,6 +125,7 @@ poppler-utils 依赖修复后，docx/pdf/snapshot/package/strict 各步骤全部
 | e | 第二层 CI 日志证据 | 查看 pdf-verify 阶段 `pdffonts unavailable` 日志 | CI 日志直证（pdf-verify 阶段 pdffonts unavailable）；本地未复现（本地已装 poppler-utils），待下次 CI 运行验证 |
 | f | 第三层本地复现（单篇根） | 构造只含一篇论文的临时 paper-root 跑 `verify_layout.py` | H 子项 (1) 输出 `PASS ... | skipped: no P4-* paper in paper-root (single-paper CI checkout)`，TOTAL 27 PASS 27 FAIL 0 |
 | g | 第三层本地回归（全量根） | 对真实工作区跑 `verify_layout.py` | P4 有构建（v0.3.18），H 子项走真实断言并通过（`1 plain interval run(s), 0 wrongly raised`），修复不改变有构建时的行为 |
+| h | CI 全链路转绿 | 修复后重跑 P5 CI（run 43884030588） | **成功**：16/16 步全过（含 strict 闸门与 Layout verification），submission-zip 工件（803,469 B，`P5-Construction_...-Liu_Xin-v0.4.22.zip`）产出；工件包内 docx 的图 1 与修复版 PNG 字节级一致（e58d0a59…），本轮修复关闭 |
 
 ### 端到端复现结果（PATH 剔除 rsvg-convert，本地实跑 `paper.py build docx`）
 
