@@ -1,9 +1,19 @@
-- id: author_a
-  name: 作者A
-  name_en: Author A
+# 作者注册表 —— 公开治理仓占位（不承载真实作者数据）
+#
+# 真实作者身份、单位、简介、联系方式登记在各论文**私有仓**的 authors.yaml
+# （私有仓可载全量信息，见 AGENTS.md 仓库分工）；本文件仅保留一条结构占位，
+# 供 schema 校验与工具冒烟测试使用，不含任何可识别到自然人的信息。
+#
+# 沿革：原文件曾登记一位真实作者的身份与联系方式。2026-11-16 公开化审计发现后
+# 已整体替换为本占位；历史提交中的相关内容已同步清除（filter-repo 重写）。
+# 新增作者请登记到论文私有仓 authors.yaml，不要写回本文件。
+
+- id: example_author
+  name: 张三
+  name_en: Zhang San
   affiliations:
-  - 云南省自然资源厅<单位已脱敏>
-  email: <邮箱已脱敏>  # 用户 2026-11-12 最终确认（189.cn 作废）；论文通讯邮箱统一此地址，源头见 PaperWorkflows/authors.txt
+  - 某某大学 某某学院
+  email: zhangsan@example.com
   orcid: null
-  git_name: janssenkm
-  git_email: janssenkm@users.noreply.github.com
+  git_name: example-user
+  git_email: example-user@users.noreply.github.com
