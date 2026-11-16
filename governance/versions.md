@@ -30,7 +30,7 @@ This file defines version numbering, repository structure, commit scoping, and r
 ### PF-V4 多仓库结构
 
 - Governance repo (`PaperWorkflows/instruction`, public): holds AGENTS.md, CLAUDE.md, project.yaml, governance/, schemas/, templates/, tools/, authors/.
-- Paper repos (`PaperWorkflows/P{N}-{AUTHOR_EN}-{YYYYMMDD}`, private): each holds one paper workspace. Independent git repo, independent GitHub remote.
+- Paper repos (`PaperWorkflows/P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})`, private; placeholder form per GC-2026-1116-06): each holds one paper workspace. Independent git repo, independent GitHub remote.
 - `papers/` directory in governance repo is gitignored. Paper repos are cloned into `papers/` by user or tooling.
 
 ### PF-V5 提交分区

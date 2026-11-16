@@ -29,7 +29,7 @@ except Exception as _mexc:  # pragma: no cover - hard dependency for build/check
     _metalayout_error = str(_mexc)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-PAPER_REPO_PATTERN = re.compile(r'^P([0-9]+)-([A-Z]+)-([0-9]{8})$')
+PAPER_REPO_PATTERN = re.compile(r'^P([0-9]+)-([A-Z]+(?:-[A-Z]+)*)-([0-9]{8})$')
 TEMPLATE_PAPER = Path(__file__).resolve().parent.parent / "templates/paper"
 GITHUB_ORG = "PaperWorkflows"
 
@@ -98,6 +98,91 @@ def parse_paper_id(pid: str) -> dict:
     if not m:
         raise ValueError(f"Invalid paper repo name: {pid} (expected P{{N}}-{{AUTHOR_EN}}-{{YYYYMMDD}}, AUTHOR_EN = author pinyin uppercase)")
     return {"number": int(m.group(1)), "author": m.group(2), "date": m.group(3)}
+
+
+# ── GC-2026-1116-06: derive_repo_name ────────────────────────────
+
+_DETERMINATION_CHARS = re.compile(r'[^A-Za-z0-9]')
+_CONTAINS_CJK = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
+_STOP_WORDS = frozenset(
+    ["and", "of", "for", "the", "a", "an", "in", "to", "on", "with", "based"]
+)
+_MAX_REPO_NAME_LEN = 100
+
+
+def derive_repo_name(paper_number: int | str, title_en: str, first_author_en: str) -> str:
+    """Derive the GitHub repo name per GC-2026-1116-06.
+
+    Format: P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})
+    - TITLE_EN: non-alnum -> _, collapse consecutive _, strip.
+    - FIRST_AUTHOR_EN: spaces/Non-alnum -> _, wrap in parens.
+    - Hard cap: full string <= 100 chars; truncate stop words then tail words.
+    - Raises ValueError if title_en or first_author_en is missing, empty, or contains CJK.
+    """
+    # Strip "P" prefix if present so P{N} renders correctly (e.g. "P9" -> "9")
+    p_n = str(paper_number).lstrip("Pp")
+
+    # Validate inputs: must be present, non-empty, no CJK
+    for label, val in [("--title-en", title_en), ("--author-name-en", first_author_en)]:
+        if not val or not val.strip():
+            raise ValueError(f"{label} is required: must not be empty (got {val!r})")
+        if _CONTAINS_CJK.search(val):
+            raise ValueError(f"{label} must not contain Chinese characters (got {val!r})")
+
+    title_en = title_en.strip()
+    first_author_en = first_author_en.strip()
+
+    # Normalize title: non-alnum -> _, collapse, strip
+    title_norm = _DETERMINATION_CHARS.sub('_', title_en)
+    title_norm = re.sub(r'_+', '_', title_norm).strip('_')
+    if not title_norm:
+        raise ValueError(f"title_en {title_en!r} normalizes to empty string — cannot derive a valid repo name")
+
+    # Normalize author: non-alnum (including space) -> _, strip, wrap in parens
+    author_norm = _DETERMINATION_CHARS.sub('_', first_author_en)
+    author_norm = re.sub(r'_+', '_', author_norm).strip('_')
+    author_parens = f"({author_norm})"
+
+    def assemble(title: str, author: str) -> str:
+        return f"P{p_n}-{title}-{author}"
+
+    # If already within limit, return directly
+    name = assemble(title_norm, author_parens)
+    if len(name) <= _MAX_REPO_NAME_LEN:
+        return name
+
+    # Step 1: try stop-word removal
+    title_words = title_norm.split('_')
+    filtered = [w for w in title_words if w.lower() not in _STOP_WORDS]
+    # P3-1: if all words are stop words, cannot derive a valid name
+    if not filtered:
+        raise ValueError(f"title_en {title_en!r} contains only stop words — cannot derive a valid repo name")
+    title_after_stop = '_'.join(filtered)
+    name = assemble(title_after_stop, author_parens)
+    if len(name) <= _MAX_REPO_NAME_LEN:
+        return name
+
+    # Step 2: if stop-word removal alone isn't enough,
+    # start from the stop-word-filtered words and truncate tail until <= 100
+    while len(filtered) > 1:
+        filtered = filtered[:-1]
+        name = assemble('_'.join(filtered), author_parens)
+        if len(name) <= _MAX_REPO_NAME_LEN:
+            return name
+
+    # Step 3: fallback — truncate original title_words tail by tail
+    orig_words = title_norm.split('_')
+    while len(orig_words) > 1:
+        orig_words = orig_words[:-1]
+        name = assemble('_'.join(orig_words), author_parens)
+        if len(name) <= _MAX_REPO_NAME_LEN:
+            return name
+
+    # Final assertion: if we get here, even one word is too long
+    raise ValueError(
+        f"Repo name {name!r} is {len(name)} chars (max {_MAX_REPO_NAME_LEN}) — title too long"
+    )
+
 
 def validate_paper_yaml(path: Path) -> dict:
     """Minimal YAML-free validation for paper.yaml (Python stdlib only)."""
@@ -287,7 +372,8 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.3.3", date: str = None) -> str:
+                     rules_version: str = "0.3.3", date: str = None,
+                     title_en: str = None, paper_version: str = "v0.1.0") -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
     chapters = DEFAULT_CHAPTERS.get(paper_type, DEFAULT_CHAPTERS["empirical"])
@@ -296,12 +382,14 @@ def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
         f"  - number: {c['number']}\n    slug: {c['slug']}\n    title: {c['title']}"
         for c in chapters
     )
+    title_en_line = f"title_en: {json.dumps(title_en, ensure_ascii=False)}" if title_en else "# title_en: (required per GC-2026-1116-06; set via --title-en at proposal)"
     return f"""schema_version: 1
 template: false
 id: {pid_number}
-paper_version: 0.1.0
+paper_version: {paper_version}
 repository_mode: per_paper_independent
-title: {title}
+title: {json.dumps(title, ensure_ascii=False)}
+{title_en_line}
 authors_confirmed: true
 authors_confirmation:
   source: proposal command
@@ -402,7 +490,7 @@ safety:
 def cmd_proposal(args):
     errors = []
 
-    # 1. Validate paper repo ID format
+    # 1. Validate paper repo ID format (local workspace ID, e.g. P1-EXAMPLE-20251110)
     try:
         meta = parse_paper_id(args.id)
     except ValueError as e:
@@ -419,6 +507,12 @@ def cmd_proposal(args):
         errors.append("--paper-type is required (theory/algorithm_experiment/software_system/empirical/mixed)")
     elif args.paper_type not in DEFAULT_CHAPTERS:
         errors.append(f"Invalid --paper-type: {args.paper_type}. Choose from: {list(DEFAULT_CHAPTERS.keys())}")
+
+    # GC-2026-1116-06: title_en and author_name_en are required for repo name derivation
+    if not args.title_en or not args.title_en.strip():
+        errors.append("--title-en is required per GC-2026-1116-06 (English title for repo name derivation)")
+    if not args.author_name_en or not args.author_name_en.strip():
+        errors.append("--author-name-en is required per GC-2026-1116-06 (English author name for repo name derivation)")
 
     if errors:
         return emit({"status": "error", "error": "Proposal conditions not met", "errors": errors}, 2)
@@ -439,11 +533,18 @@ def cmd_proposal(args):
             "hint": "https://cli.github.com/"
         }, 2)
 
-    # 5. Write per-paper authors.yaml (private repo: full details allowed)
+    # 5. Derive GitHub repo name per GC-2026-1116-06
+    paper_number = meta["number"]
+    try:
+        repo_name = derive_repo_name(paper_number, args.title_en.strip(), args.author_name_en.strip())
+    except (ValueError, AssertionError) as e:
+        return emit({"status": "error", "error": str(e)}, 2)
+
+    # 6. Write per-paper authors.yaml (private repo: full details allowed)
     author_entry = {
         "id": author_pinyin.lower(),
         "name": args.author_name.strip(),
-        "name_en": args.author_name_en or author_pinyin.title(),
+        "name_en": args.author_name_en.strip(),
         "affiliations": [args.affiliation] if args.affiliation else [],
         "email": args.email,
         "orcid": None,
@@ -465,11 +566,11 @@ def cmd_proposal(args):
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             content = item.read_text(encoding="utf-8")
-            content = content.replace("paper_version: 0.1.0", f"paper_version: {args.version or '0.1.0'}")
+            content = content.replace("paper_version: 0.1.0", f"paper_version: {args.version or 'v0.1.0'}")
             target.write_text(content, encoding="utf-8")
             created.append(str(rel))
 
-    # 8. Write confirmed paper.yaml
+    # 8. Write confirmed paper.yaml (with title_en per GC-2026-1116-06)
     paper_yaml_content = build_paper_yaml(
         pid=args.id,
         title=args.title.strip(),
@@ -477,6 +578,8 @@ def cmd_proposal(args):
         paper_type=args.paper_type,
         rules_version="0.3.3",
         date=args.date,
+        title_en=args.title_en.strip(),
+        paper_version=args.version or "v0.1.0",
     )
     (dest / "paper.yaml").write_text(paper_yaml_content, encoding="utf-8")
     created.append("paper.yaml")
@@ -555,15 +658,15 @@ def cmd_proposal(args):
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         git_err = str(e)
 
-    # 11. Create GitHub repo (private)
+    # 11. Create GitHub repo (private) using derived repo name per GC-2026-1116-06
     gh_created = False
     gh_error = None
     gh_url = None
     if git_ok:
-        gh_result = create_github_repo(args.id, private=True)
+        gh_result = create_github_repo(repo_name, private=True)
         if gh_result.get("created"):
             gh_created = True
-            gh_url = f"git@github.com:{GITHUB_ORG}/{args.id}.git"
+            gh_url = f"git@github.com:{GITHUB_ORG}/{repo_name}.git"
             # Set remote and push
             try:
                 subprocess.run(["git", "remote", "add", "origin", gh_url], cwd=dest, check=True, capture_output=True)
@@ -585,8 +688,9 @@ def cmd_proposal(args):
         "author": author_entry,
         "paper_type": args.paper_type,
         "destination": str(dest),
-        "github_repo": f"{GITHUB_ORG}/{args.id}" if gh_created else None,
+        "github_repo": f"{GITHUB_ORG}/{repo_name}" if gh_created else None,
         "github_url": gh_url,
+        "derived_repo_name": repo_name,
         "github_created": gh_created,
         "github_error": gh_error,
         "git_initialized": git_ok,
@@ -620,7 +724,7 @@ def cmd_scaffold(args):
             target.parent.mkdir(parents=True, exist_ok=True)
             content = item.read_text(encoding="utf-8")
             content = content.replace("paper_version: 0.1.0",
-                                      f"paper_version: {args.version or '0.1.0'}")
+                                      f"paper_version: {args.version or 'v0.1.0'}")
             pid_number = args.id.split("-")[0]
             # GC-2026-1112-06 终审返工（P1-2）：必须行锚定替换。旧写法的子串替换
             # `content.replace("id: null", ...)` 会把 authors.yaml 的 `orcid: null`
@@ -655,28 +759,66 @@ def cmd_scaffold(args):
             created.append(f"body/{idx:02d}-{slug}.md")
 
     # Initialize git repo
+    git_ok = True
+    git_err = None
+    remote_url = None
+    scaffold_warning = None
     try:
         subprocess.run(["git", "init", str(dest)], check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "janssenkm"], cwd=dest, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "janssenkm@users.noreply.github.com"], cwd=dest, check=True, capture_output=True)
-        remote_url = f"git@github.com:PaperWorkflows/{args.id}.git"
-        subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=dest, check=True, capture_output=True)
-        git_ok = True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         git_ok = False
         git_err = str(e)
 
+    if git_ok:
+        # GC-2026-1116-06: optionally derive repo name from title_en + author_name_en
+        has_title_en = args.title_en and args.title_en.strip()
+        has_author_en = args.author_name_en and args.author_name_en.strip()
+
+        if has_title_en and has_author_en:
+            try:
+                repo_name = derive_repo_name(meta["number"], args.title_en.strip(), args.author_name_en.strip())
+                remote_url = f"git@github.com:PaperWorkflows/{repo_name}.git"
+            except (ValueError, AssertionError) as e:
+                git_err = str(e)
+                # git was initialized, so don't report git_ok=false; just no valid remote
+                remote_url = None
+        elif has_title_en and not has_author_en:
+            remote_url = f"git@github.com:PaperWorkflows/{args.id}.git"
+            scaffold_warning = "--author-name-en is provided without --title-en, or vice versa; repo name derived from workspace ID instead of GC-2026-1116-06. Both --title-en and --author-name-en are required for derivation."
+        elif has_author_en and not has_title_en:
+            remote_url = f"git@github.com:PaperWorkflows/{args.id}.git"
+            scaffold_warning = "--author-name-en is provided without --title-en, or vice versa; repo name derived from workspace ID instead of GC-2026-1116-06. Both --title-en and --author-name-en are required for derivation."
+        else:
+            # Maintain backward compat: origin = workspace ID
+            remote_url = f"git@github.com:PaperWorkflows/{args.id}.git"
+            scaffold_warning = (
+                "Repo name will be derived per GC-2026-1116-06 after --title-en and --author-name-en are provided. "
+                "Current origin uses workspace ID; expect rename via `gh repo rename`."
+            )
+
+        if git_ok and remote_url and not git_err:
+            subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=dest, check=True, capture_output=True)
+
     result = {
-        "status": "ok",
+        "status": "ok" if git_ok and not git_err else ("error" if git_err else "partial"),
         "paper_id": args.id,
         "destination": str(dest),
         "git_initialized": git_ok,
-        "remote_url": f"git@github.com:PaperWorkflows/{args.id}.git",
+        "remote_url": remote_url,
         "files_created": len(set(created)),
         "created": created,
     }
     if not git_ok:
         result["git_error"] = git_err
+        return emit(result, 2)
+    if git_err and git_ok:
+        # Derive failed but git was initialized — report error with exit code 2
+        result["git_error"] = git_err
+        return emit(result, 2)
+    if scaffold_warning:
+        result["warning"] = scaffold_warning
     return emit(result)
 
 # ── check ────────────────────────────────────────────────────────
@@ -6073,22 +6215,25 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     p_proposal = sub.add_parser("proposal", help="Execute full proposal flow: author + materials → GitHub repo")
-    p_proposal.add_argument("--id", required=True, help="Paper repo name, e.g. P1-EXAMPLE-20251110")
+    p_proposal.add_argument("--id", required=True, help="Paper workspace ID, e.g. P1-EXAMPLE-20251110")
     p_proposal.add_argument("--author-name", required=True, help="First author full name (native script)")
     p_proposal.add_argument("--author-pinyin", required=True, help="First author pinyin (uppercase, e.g. EXAMPLE)")
-    p_proposal.add_argument("--title", required=True, help="Paper title")
+    p_proposal.add_argument("--title", required=True, help="Paper title (Chinese or native)")
     p_proposal.add_argument("--paper-type", required=True, choices=list(DEFAULT_CHAPTERS.keys()), help="Paper type")
-    p_proposal.add_argument("--author-name-en", default=None, help="Author name in English (optional)")
+    p_proposal.add_argument("--title-en", required=True, help="Paper English title for repo name derivation (GC-2026-1116-06)")
+    p_proposal.add_argument("--author-name-en", required=True, help="First author English name for repo name derivation (GC-2026-1116-06)")
     p_proposal.add_argument("--affiliation", default=None, help="Author affiliation (optional)")
     p_proposal.add_argument("--email", default=None, help="Author email (optional, null for privacy)")
     p_proposal.add_argument("--date", default=None, help="Proposal date (ISO format, default: now)")
     p_proposal.add_argument("--dest", default=None, help="Destination directory (default: papers/<id>)")
-    p_proposal.add_argument("--version", default="0.1.0", help="Initial paper_version (default: 0.1.0)")
+    p_proposal.add_argument("--version", default="v0.1.0", help="Initial paper_version (default: v0.1.0, SemVer vMAJOR.MINOR.PATCH)")
 
     p_scaffold = sub.add_parser("scaffold", help="Create paper workspace from template (no GitHub)")
-    p_scaffold.add_argument("--id", required=True, help="Paper repo name, e.g. P1-EXAMPLE-20251110")
+    p_scaffold.add_argument("--id", required=True, help="Paper workspace ID, e.g. P1-EXAMPLE-20251110")
+    p_scaffold.add_argument("--title-en", default=None, help="Paper English title (optional; if set with --author-name-en, origin derives repo name per GC-2026-1116-06)")
+    p_scaffold.add_argument("--author-name-en", default=None, help="First author English name (optional; requires --title-en for origin derivation)")
     p_scaffold.add_argument("--dest", help="Destination directory (default: papers/<id>)")
-    p_scaffold.add_argument("--version", default="0.1.0", help="Initial paper_version (default: 0.1.0)")
+    p_scaffold.add_argument("--version", default="v0.1.0", help="Initial paper_version (default: v0.1.0, SemVer vMAJOR.MINOR.PATCH)")
 
     p_check = sub.add_parser("check", help="Validate a paper workspace against schema and required paths")
     p_validate = sub.add_parser("validate", help="Full JSON Schema validation of paper.yaml (PF-PL1 admission gate)")

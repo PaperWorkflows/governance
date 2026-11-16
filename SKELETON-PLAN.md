@@ -181,7 +181,7 @@ P{N}-{AUTHOR_EN}-{YYYYMMDD}/                ← 论文工作区根目录（独�
 | 概念 | 格式 | 示例 |
 |---|---|---|
 | 论文编号 | `P` + 正整数 | `P1`, `P2`, ... `P999` |
-| 论文仓库名 | `P{N}-{AUTHOR_EN}-{YYYYMMDD}` | `P1-EXAMPLE-20251110` |
+| 论文仓库名 | `P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})` | `P1-Example_Paper-(Author_A)` |
 | 本地工作区目录 | `papers/P{N}-{AUTHOR_EN}-{YYYYMMDD}/` | `papers/P1-EXAMPLE-20251110/` |
 | 正文章节文件 | `{NN}-{slug}.md` | `01-introduction.md` |
 | 图文件 | `fig{N}-{slug}.{png\|svg\|pdf}` | `fig1-handshake-flow.svg` |
@@ -190,9 +190,8 @@ P{N}-{AUTHOR_EN}-{YYYYMMDD}/                ← 论文工作区根目录（独�
 | 临时目录 | `temp/P{N}-{AUTHOR_EN}-{YYYYMMDD}/TASK-{NNNN}/` | `temp/P1-EXAMPLE-20251110/TASK-0001/` |
 
 **注意**：
-- 仓库名中的 AUTHOR 为第一作者拼音大写（如 `EXAMPLE`）
-- 日期为论文立项/创建日期（`YYYYMMDD`）
-- 题名变更不影响仓库名（仓库名只含编号+作者+日期，题名在 `paper.yaml.title` 中）
+- 仓库名中的 TITLE 取 `paper.yaml#title_en`，词间以下划线连接；AUTHOR 为第一作者 `name_en` 包裹圆括号
+- 题名变更不影响仓库名（仓库名只含编号+标题+作者，题目标识已在 `paper.yaml.title_en` 中）
 
 ---
 
@@ -204,7 +203,7 @@ P{N}-{AUTHOR_EN}-{YYYYMMDD}/                ← 论文工作区根目录（独�
 authors:
   - name: 作者A                      # 中文名
     name_en: Author A              # 英文名
-    pinyin: EXAMPLE                # 拼音（大写，用于仓库命名）
+    pinyin: EXAMPLE                # 拼音（大写，仅用于本地工作区目录命名）
     affiliations:
       - 某某大学计算机学院            # 单位
     email: null                    # 隐私保护，null 表示不公开
@@ -255,7 +254,7 @@ authors:
 - 禁止混入论文正式内容
 - `papers/` 和 `temp/` 在 `.gitignore` 中
 
-### 7.2 论文仓库（`PaperWorkflows/P{N}-{AUTHOR_EN}-{YYYYMMDD}`）
+### 7.2 论文仓库（`PaperWorkflows/P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})`）
 
 - 每篇论文独立仓库
 - 各自拥有独立的 GitHub remote（private）
