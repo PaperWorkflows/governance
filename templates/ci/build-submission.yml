@@ -41,10 +41,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system dependencies (pandoc / LibreOffice / CJK fonts)
+      - name: Install system dependencies (LibreOffice / CJK fonts / pinned pandoc)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk pandoc
+          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk
+          # pandoc 固定 3.9：参考 docx 由 pandoc 默认 reference.docx 生成，版本不同则
+          # 字节不同，会触发 PF-B11 refdoc 同步校验失败（GC-2026-1116-01 记录）。
+          curl -sSL -o /tmp/pandoc.deb "https://github.com/jgm/pandoc/releases/download/3.9/pandoc-3.9-1-amd64.deb"
+          sudo apt-get install -y /tmp/pandoc.deb
           pandoc --version | head -1
           soffice --version | head -1
 
