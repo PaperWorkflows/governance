@@ -111,7 +111,7 @@ poppler-utils 依赖修复后，docx/pdf/snapshot/package/strict 各步骤全部
 
 ## 7. 待办事项
 
-1. **其余论文仓 `.github/workflows/build-submission.yml` 同步**：P5 已修改，其余论文仓需跟进同步 librsvg2-bin 与 poppler-utils 两项安装。
+1. ~~**其余论文仓 `.github/workflows/build-submission.yml` 同步**~~ **已于 2026-11-16 完成**：P1/P2/P3/P4/P6/P7/P8/P9 共 8 仓同步 librsvg2-bin 与 poppler-utils 两项（各仓单文件提交，在途改动经 stash/pop 原样保留；P7 为 main 分支；P10 无 `.github/workflows`，不在范围）。同步后 8 仓 CI 全部转绿（success）。
 2. ~~CI 全链路（docx → pdf → snapshot → package → strict → layout → zip）转绿后关闭本轮修复。~~ **已于 2026-11-16 关闭**：重跑运行 43884030588 全 16 步成功，submission-zip 工件产出并经字节级验证包含修复后的图 1（见 §8 行 h）。
 
 ## 8. 验证
