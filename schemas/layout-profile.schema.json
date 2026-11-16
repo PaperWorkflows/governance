@@ -649,7 +649,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Reference-entry templates for the four venue-silent document types: keys law [Z] / regulation [Z] / standard [S] / standard_online [S/OL]; online law/policy text follows venue template ④ [EB/OL] by cross-reference and is NOT registered here (single source of truth). Values are {placeholder} templates forming the machine-checkable binding source (PF-W6). Venue-specified templates (专著[M]/期刊[J]/会议[C]∥/预印本[EB/OL]) are not duplicated here. GC-2026-1114-01."
+          "description": "Reference-entry templates for the five venue-silent document types: keys law [Z] / regulation [Z] / standard [S] / standard_online [S/OL] / thesis [D]; online law/policy text follows venue template ④ [EB/OL] by cross-reference and is NOT registered here (single source of truth). Values are {placeholder} templates forming the machine-checkable binding source (PF-W6). Venue-specified templates (专著[M]/期刊[J]/会议[C]∥/预印本[EB/OL]) are not duplicated here. GC-2026-1114-01; GC-2026-1117-01 增 thesis [D]."
         }
       }
     },
