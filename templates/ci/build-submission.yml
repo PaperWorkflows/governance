@@ -44,12 +44,12 @@ jobs:
       - name: Install system dependencies (pandoc / LibreOffice / CJK fonts)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk pandoc
           pandoc --version | head -1
           soffice --version | head -1
 
       - name: Install Python dependencies
-        run: python -m pip install --upgrade pip pyyaml
+        run: python -m pip install --upgrade pip pyyaml jsonschema
 
       # PF-PL1 准入校验为咨询步骤：budget.confirmed 等字段属用户决策项（各篇 paper.yaml
       # unresolved 已登记"不得擅改"），本地构建流程同样不以其为阻断，故 CI 不阻断；
