@@ -1,9 +1,9 @@
-# 治理变更记录 GC-2026-1116-08：CI 构建环境依赖缺失（rsvg-convert / poppler-utils）导致 Build docx/pdf 硬失败
+# 治理变更记录 GC-2026-1116-08：CI 全链路转绿修复——构建环境依赖缺失（rsvg-convert / poppler-utils）与 Layout verification 跨论文测试缺陷
 
 - 日期：2026-11-16
 - 编号：GC-2026-1116-08
-- 类型：CI 环境依赖修复 + 诊断加固
-- 触发：CI（`build-submission.yml`）Build docx 步骤在 `svg_alternatives_preserved` 校验上硬失败——三个图全部产出 SVG-only blip（`primary_rid` 为空），缺少位图回退。本地用相同代码构建却通过。rsvg-convert 修复推送后，Build docx 转绿，失败点前移至 Build pdf 的 pdf-verify 阶段——`pdffonts unavailable`，PDF 本体已由 LibreOffice 成功生成，但无法验证，不得发布。
+- 类型：CI 环境依赖修复 + 诊断加固 + 测试缺陷修复
+- 触发：CI（`build-submission.yml`）Build docx 步骤在 `svg_alternatives_preserved` 校验上硬失败——三个图全部产出 SVG-only blip（`primary_rid` 为空），缺少位图回退。本地用相同代码构建却通过。rsvg-convert 修复推送后，Build docx 转绿，失败点前移至 Build pdf 的 pdf-verify 阶段——`pdffonts unavailable`，PDF 本体已由 LibreOffice 成功生成，但无法验证，不得发布。poppler-utils 修复后，docx/pdf/snapshot/package/strict 全部通过，失败点再前移至 Layout verification 的 H 子项——硬编码查找 P4 构建，单篇检出的 CI 中永远无 P4。
 - 规则依据：AGENTS.md F9（治理变更纪律）
 
 ---
@@ -27,6 +27,14 @@ rsvg-convert 依赖修复后，Build docx 步骤通过，CI 失败点前移至 B
 - 伴随提示：`"the PDF cannot be verified and must not be published"`。
 - CI 日志直述根因为 poppler-utils 未安装，无歧义。
 - 本地机器因预装 `poppler-utils`，未出现此问题。
+
+### 第三层：Layout verification H 子项失败（跨论文硬编码测试）
+
+poppler-utils 依赖修复后，docx/pdf/snapshot/package/strict 各步骤全部通过，CI 失败点前移至倒数第二关 Layout verification：
+
+- 唯一失败项：`FAIL H. interval [12, 40] not superscripted (P4) | no P4 build found`（26/27 通过）。
+- 该子项硬编码在 paper-root 的当前构建中查找 `P4-` 前缀论文，而 CI 的 paper-root 只检出单篇论文（P5），永远找不到 P4 → 记 FAIL → 任何论文仓的 CI 都不可能转绿。
+- 本地全量工作区不受影响（P4 有构建 v0.3.18 时该子项走真实断言并通过）。
 
 ## 2. 根因分析
 
@@ -93,6 +101,7 @@ rsvg-convert 依赖修复后，Build docx 步骤通过，CI 失败点前移至 B
 | `papers/P5-AUDIT-EVIDENCE-20251111/.github/workflows/build-submission.yml` | 同步模板变更（librsvg2-bin + poppler-utils 两项） |
 | 各论文仓 `.github/workflows/build-submission.yml` | 其余论文仓待同步 librsvg2-bin 与 poppler-utils 两项 |
 | `tools/paper.py` | `svg_alternatives_preserved` 校验诊断加固：检测 pandoc stderr 中 `rsvg-convert`，给出对应提示（见 §4） |
+| `tools/verify_layout.py` | `section_h` 子项 (1)（P4 专属回归守卫）在 paper-root 无 `P4-*` 论文（单篇 CI 检出）或 P4 无当前构建时，由记 FAIL 改为记跳过（`skipped: ...`），不再阻塞单篇仓 CI；P4 有构建时的真实断言逻辑不变 |
 
 ## 6. 影响面
 
@@ -114,6 +123,8 @@ rsvg-convert 依赖修复后，Build docx 步骤通过，CI 失败点前移至 B
 | c | 诊断提示 | 端到端复现中观察失败提示文案 | 通过（见端到端复现结果） |
 | d | 语法 | `py_compile tools/paper.py` | 通过 |
 | e | 第二层 CI 日志证据 | 查看 pdf-verify 阶段 `pdffonts unavailable` 日志 | CI 日志直证（pdf-verify 阶段 pdffonts unavailable）；本地未复现（本地已装 poppler-utils），待下次 CI 运行验证 |
+| f | 第三层本地复现（单篇根） | 构造只含一篇论文的临时 paper-root 跑 `verify_layout.py` | H 子项 (1) 输出 `PASS ... | skipped: no P4-* paper in paper-root (single-paper CI checkout)`，TOTAL 27 PASS 27 FAIL 0 |
+| g | 第三层本地回归（全量根） | 对真实工作区跑 `verify_layout.py` | P4 有构建（v0.3.18），H 子项走真实断言并通过（`1 plain interval run(s), 0 wrongly raised`），修复不改变有构建时的行为 |
 
 ### 端到端复现结果（PATH 剔除 rsvg-convert，本地实跑 `paper.py build docx`）
 
