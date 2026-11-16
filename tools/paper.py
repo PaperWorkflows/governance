@@ -2530,6 +2530,34 @@ def _style_block(styles_xml: str, style_id: str) -> str:
     return m.group(0) if m else ""
 
 
+def _rsvg_stderr_snippet(stderr: str) -> str:
+    """Extract a stderr snippet relevant to the rsvg-convert failure.
+
+    When pandoc cannot rasterize SVGs, the diagnostic warning
+    ("Could not convert image … check that rsvg-convert is in path")
+    appears early in stderr, while the tail is often noise from later
+    stages (e.g. glossary translation warnings).  Taking the last 300
+    chars would cut the useful evidence — so we scan line-by-line for
+    rsvg-relevant lines and concatenate them (capped at 300 chars).
+    Falls back to the tail when no relevant lines are found.
+
+    Args:
+        stderr: pandoc stderr string, or None (will be treated as empty).
+    """
+    stderr = stderr or ""
+    lines = stderr.strip().splitlines()
+    relevant = [
+        ln for ln in lines
+        if "rsvg-convert" in ln.lower() or "could not convert image" in ln.lower()
+    ]
+    if relevant:
+        snippet = " | ".join(relevant)[:300]
+    else:
+        # Fallback (new behaviour): last 300 chars of stderr when no rsvg-relevant line matches.
+        snippet = stderr.strip()[-300:]
+    return snippet
+
+
 def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[list, list]:
     """Profile-landing assertions on the produced docx (PF-B3 implementation carrier).
 
@@ -4149,15 +4177,35 @@ def _cmd_build_docx_impl(args) -> tuple:
         # blip carrying an svgBlip without a raster fallback is exactly the
         # 2026-11-12 empty-figure-slot construction.
         if svg_verified["blips_missing_raster"]:
+            # 2026-11-16: pandoc stderr may contain "check that rsvg-convert is in path"
+            # when rsvg-convert is missing — same SVG-only blip symptom, different root cause
+            # from the '../figures/' form issue (2026-11-12). Append pandoc stderr snippet
+            # to hint so this diagnostic becomes self-explanatory in CI logs.
+            #
+            # 2026-11-16 refinement: the rsvg warning lives at the front of stderr
+            # (image-parsing phase), while the tail is typically noise (glossary
+            # translation warnings, etc.). _rsvg_stderr_snippet scans line-by-line
+            # for rsvg-relevant lines and prioritises them; falls back to the
+            # last-300-chars when nothing matches.
+            stderr_snippet = _rsvg_stderr_snippet(result.stderr or "")
+            stderr_marker = (" | pandoc stderr: " + stderr_snippet) if stderr_snippet else ""
+            # 2026-11-16 misdiagnosis case: missing librsvg2-bin on CI produces the same
+            # SVG-only blip but the root cause is the absent rsvg-convert, not figure path form.
+            if "rsvg-convert" in (result.stderr or "").lower():
+                hint = ("pandoc could not rasterize the SVG bitmap fallback: rsvg-convert is unavailable "
+                        "(install librsvg2-bin or ensure rsvg-convert is in PATH) (GC-2026-1116-08)"
+                        + stderr_marker)
+            else:
+                hint = ("an SVG-only blip renders as an EMPTY figure slot (ab0bdcc, 2026-11-12): "
+                        "reference figures as 'figures/x.svg' (the pandoc --resource-path already "
+                        "covers it) so pandoc emits the PNG fallback alongside the svgBlip; the "
+                        "'../figures/' form produces an SVG-only blip" + stderr_marker)
             failures.append({
                 "check": "svg_alternatives_preserved",
                 "expected": "every <a:blip> carrying an <asvg:svgBlip> also carries a raster "
                             "r:embed fallback whose media part exists",
                 "actual": svg_verified["missing"],
-                "hint": ("an SVG-only blip renders as an EMPTY figure slot (ab0bdcc, 2026-11-12): "
-                         "reference figures as 'figures/x.svg' (the pandoc --resource-path already "
-                         "covers it) so pandoc emits the PNG fallback alongside the svgBlip; the "
-                         "'../figures/' form produces an SVG-only blip"),
+                "hint": hint,
             })
 
         # ── content-compliance assertion: equations must be OMML, not images (S9) ──

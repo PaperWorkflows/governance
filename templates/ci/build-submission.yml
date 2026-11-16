@@ -41,11 +41,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system dependencies (LibreOffice / CJK fonts)
+      - name: Install system dependencies (LibreOffice / CJK fonts / rsvg-convert / poppler-utils)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk
+          # librsvg2-bin（rsvg-convert）：pandoc 生成 docx 时对 SVG 图片的光栅回退
+          # 依赖 rsvg-convert（GC-2026-1113-02 svg_alternatives_preserved 校验要求
+          # 每个 svgBlip 必带位图 r:embed）；缺失时 pandoc 产出 SVG-only blip，构建硬失败。
+          # poppler-utils（pdffonts/pdftoppm/pdftotext/pdfimages）：PDF 构建校验
+          # （字体清单、页面光栅、版面 bbox、图像清单）依赖；缺失时 pdf-verify 阶段
+          # 硬失败（"pdffonts unavailable"），PDF 无法验证不得发布。
+          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk librsvg2-bin poppler-utils
           soffice --version | head -1
+          rsvg-convert --version | head -1
+          pdffonts -v 2>&1 | head -1
 
       - name: Install Python dependencies
         run: python -m pip install --upgrade pip pyyaml jsonschema pypandoc-binary
