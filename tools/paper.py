@@ -111,11 +111,11 @@ _MAX_REPO_NAME_LEN = 100
 
 
 def derive_repo_name(paper_number: int | str, title_en: str, first_author_en: str) -> str:
-    """Derive the GitHub repo name per GC-2026-1116-06.
+    """Derive the GitHub repo name per GC-2026-1116-07 (author hyphen-separated).
 
-    Format: P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})
+    Format: P{N}-{TITLE_EN}-{FIRST_AUTHOR_EN}
     - TITLE_EN: non-alnum -> _, collapse consecutive _, strip.
-    - FIRST_AUTHOR_EN: spaces/Non-alnum -> _, wrap in parens.
+    - FIRST_AUTHOR_EN: spaces/Non-alnum -> _, joined with preceding hyphen.
     - Hard cap: full string <= 100 chars; truncate stop words then tail words.
     - Raises ValueError if title_en or first_author_en is missing, empty, or contains CJK.
     """
@@ -138,16 +138,18 @@ def derive_repo_name(paper_number: int | str, title_en: str, first_author_en: st
     if not title_norm:
         raise ValueError(f"title_en {title_en!r} normalizes to empty string — cannot derive a valid repo name")
 
-    # Normalize author: non-alnum (including space) -> _, strip, wrap in parens
+    # Normalize author: non-alnum (including space) -> _, strip, hyphen-separated
     author_norm = _DETERMINATION_CHARS.sub('_', first_author_en)
     author_norm = re.sub(r'_+', '_', author_norm).strip('_')
-    author_parens = f"({author_norm})"
+    if not author_norm:
+        raise ValueError(f"name_en {first_author_en!r} normalizes to empty string — cannot derive a valid repo name")
+    author_hyphen = f"-{author_norm}"
 
     def assemble(title: str, author: str) -> str:
-        return f"P{p_n}-{title}-{author}"
+        return f"P{p_n}-{title}{author}"
 
     # If already within limit, return directly
-    name = assemble(title_norm, author_parens)
+    name = assemble(title_norm, author_hyphen)
     if len(name) <= _MAX_REPO_NAME_LEN:
         return name
 
@@ -158,7 +160,7 @@ def derive_repo_name(paper_number: int | str, title_en: str, first_author_en: st
     if not filtered:
         raise ValueError(f"title_en {title_en!r} contains only stop words — cannot derive a valid repo name")
     title_after_stop = '_'.join(filtered)
-    name = assemble(title_after_stop, author_parens)
+    name = assemble(title_after_stop, author_hyphen)
     if len(name) <= _MAX_REPO_NAME_LEN:
         return name
 
@@ -166,7 +168,7 @@ def derive_repo_name(paper_number: int | str, title_en: str, first_author_en: st
     # start from the stop-word-filtered words and truncate tail until <= 100
     while len(filtered) > 1:
         filtered = filtered[:-1]
-        name = assemble('_'.join(filtered), author_parens)
+        name = assemble('_'.join(filtered), author_hyphen)
         if len(name) <= _MAX_REPO_NAME_LEN:
             return name
 
@@ -174,7 +176,7 @@ def derive_repo_name(paper_number: int | str, title_en: str, first_author_en: st
     orig_words = title_norm.split('_')
     while len(orig_words) > 1:
         orig_words = orig_words[:-1]
-        name = assemble('_'.join(orig_words), author_parens)
+        name = assemble('_'.join(orig_words), author_hyphen)
         if len(name) <= _MAX_REPO_NAME_LEN:
             return name
 

@@ -1,6 +1,7 @@
 # 治理变更记录 GC-2026-1116-06：论文仓命名规范修正（下划线词间连接＋作者圆括号形式）
 
 > 本记录为 GC-2026-1116-02 的修订版；计划版本 v2，独立计划审查提出的补正项已并入；落盘后独立复核通过方可提交。
+> 已被 GC-2026-1116-07 修订：ci 模板两处 governance→instruction 误改由 GC-2026-1116-07 回退为 PaperWorkflows/governance；作者圆括号形式已由 GC-2026-1116-07 修订为连字符形式；历史结论不改写，仅在遗留文案表追加回退注释。
 
 - 编号：GC-2026-1116-06
 - 计划版本：v2（经独立审查补正后批准）
@@ -100,8 +101,8 @@ GitHub 论文仓名 = P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})
 |---|---|---|
 | `governance/build.md:140` (PF-B16) | `标题（第一作者中文名）.zip`（venue S19） | `<repo-name>-<paper_version>.zip`；PF-B7 传统名保留为 `pack` 工具输出的 `submission_name_pf_b7` 兜底字段 |
 | `templates/ci/build-submission.yml:7` | `标题（第一作者中文名）.zip（PF-B7 / venue S19）` | `仓库名 + 版本号`（`<repo-name>-<paper_version>.zip`） |
-| `templates/ci/build-submission.yml:35` | `repository: PaperWorkflows/governance`（治理仓旧名遗留） | `repository: PaperWorkflows/instruction`（现治理仓名） |
-| `templates/ci/build-submission.yml:4` | `公共治理仓 PaperWorkflows/governance` | `公共治理仓 PaperWorkflows/instruction` |
+| `templates/ci/build-submission.yml:35` | `repository: PaperWorkflows/governance`（治理仓旧名遗留） | `repository: PaperWorkflows/instruction`（现治理仓名，GC-2026-1116-07 回退为 `governance`） |
+| `templates/ci/build-submission.yml:4` | `公共治理仓 PaperWorkflows/governance` | `公共治理仓 PaperWorkflows/instruction`（GC-2026-1116-07 回退为 `governance`） |
 | `tools/paper.py:build_paper_yaml` | `paper_version: 0.1.0`（缺 `v` 前缀，proposal 新建工作区过不了 validate） | 新增 `paper_version` 参数，proposal 传 `args.version`（缺省 `v0.1.0`），scaffold 同理 |
 
 ---

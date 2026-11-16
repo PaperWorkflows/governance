@@ -54,11 +54,11 @@ orchestration:
 # GitHub org and identity
 github:
   org: PaperWorkflows
-  governance_repo: instruction
+  governance_repo: governance
   # Local work directory pattern (unchanged; consistent with README "local directory" naming)
   paper_repo_pattern: 'P{N}-{AUTHOR_EN}-{YYYYMMDD}'
-  # GitHub repo name: ≤100 chars, underscore word-join, author in parens; see GC-2026-1116-06
-  paper_repo_name_pattern: 'P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})'
+  # GitHub repo name: ≤100 chars, underscore word-join, author hyphen-separated; see GC-2026-1116-06/07
+  paper_repo_name_pattern: 'P{N}-{TITLE_EN}-{FIRST_AUTHOR_EN}'
 
 git_identity:
   name: janssenkm

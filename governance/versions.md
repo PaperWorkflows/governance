@@ -29,8 +29,8 @@ This file defines version numbering, repository structure, commit scoping, and r
 
 ### PF-V4 多仓库结构
 
-- Governance repo (`PaperWorkflows/instruction`, public): holds AGENTS.md, CLAUDE.md, project.yaml, governance/, schemas/, templates/, tools/, authors/.
-- Paper repos (`PaperWorkflows/P{N}-{TITLE_EN}-({FIRST_AUTHOR_EN})`, private; placeholder form per GC-2026-1116-06): each holds one paper workspace. Independent git repo, independent GitHub remote.
+- Governance repo (`PaperWorkflows/governance`, public): holds AGENTS.md, CLAUDE.md, project.yaml, governance/, schemas/, templates/, tools/, authors/.
+- Paper repos (`PaperWorkflows/P{N}-{TITLE_EN}-{FIRST_AUTHOR_EN}`, private; placeholder form per GC-2026-1116-06, author hyphen form per GC-2026-1116-07): each holds one paper workspace. Independent git repo, independent GitHub remote.
 - `papers/` directory in governance repo is gitignored. Paper repos are cloned into `papers/` by user or tooling.
 
 ### PF-V5 提交分区
@@ -77,12 +77,12 @@ This file defines version numbering, repository structure, commit scoping, and r
   14. `experiments/` — 实验目录（含 data/, code/, logs/, record.yaml）
   15. `appendix/` — 附录目录
   16. `build/` — 构建配置目录（含 layout.yaml）
-  17. `AGENTS.md` — 治理指针（指向 PaperWorkflows/instruction/AGENTS.md）
+  17. `AGENTS.md` — 治理指针（指向 PaperWorkflows/governance/AGENTS.md）
   18. `materials.yaml` — 素材注册表（文献、数据集、代码、工具）
 - `check` 工具验证骨架成员完整性；缺失则检查失败。
 
 ### PF-V10 论文仓库独立性
 
 - 论文仓库为私有，所有作者信息、基金信息、编写规范均存放于该仓库内。
-- 治理仓库（instruction）不存储任何论文的作者或基金信息。
+- 治理仓库（governance）不存储任何论文的作者或基金信息。
 - Git 提交身份统一使用 `janssenkm <janssenkm@users.noreply.github.com>`，与论文作者身份无关。
