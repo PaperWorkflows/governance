@@ -1,0 +1,84 @@
+name: build-submission
+
+# 远程构建投稿包（docx / pdf / package / zip）。
+# 工具链来自公共治理仓 PaperWorkflows/governance（master），本仓不内嵌副本。
+# 门禁顺序遵循治理仓 build.md：validate → build docx/pdf → snapshot → package assemble
+#   → package --verify-only --strict（投稿闸门）→ verify_layout → pack zip。
+# 产物：actions/artifact「submission-zip」，文件名 标题（第一作者中文名）.zip（PF-B7 / venue S19）。
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-submission-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build docx / pdf / package / zip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout paper repository
+        uses: actions/checkout@v4
+        with:
+          path: ${{ github.event.repository.name }}
+
+      - name: Checkout governance (build toolchain)
+        uses: actions/checkout@v4
+        with:
+          repository: PaperWorkflows/governance
+          ref: master
+          path: governance
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies (pandoc / LibreOffice / CJK fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice fonts-noto-cjk
+          pandoc --version | head -1
+          soffice --version | head -1
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip pyyaml
+
+      - name: Workspace schema validation
+        run: python3 -I governance/tools/paper.py validate --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}"
+
+      - name: Build docx
+        run: python3 -I governance/tools/paper.py build docx --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}"
+
+      - name: Build pdf
+        run: python3 -I governance/tools/paper.py build pdf --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}"
+
+      - name: Input snapshot (PF-B4)
+        run: python3 -I governance/tools/paper.py build snapshot --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}"
+
+      - name: Assemble submission package (PF-B16)
+        run: python3 -I governance/tools/paper.py package --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}"
+
+      - name: Verify package strict (submission gate)
+        run: python3 -I governance/tools/paper.py package --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}" --verify-only --strict
+
+      - name: Layout verification
+        run: python3 -I governance/tools/verify_layout.py --paper-root "$GITHUB_WORKSPACE"
+
+      - name: Pack submission zip
+        run: python3 -I governance/tools/pack_submission_zip.py --paper "$GITHUB_WORKSPACE/${{ github.event.repository.name }}" --out "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload submission zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: submission-zip
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
