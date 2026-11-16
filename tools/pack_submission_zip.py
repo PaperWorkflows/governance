@@ -3,11 +3,13 @@
 """Pack the submission zip from an assembled package directory.
 
 Usage:
-    pack_submission_zip.py --paper <paper_dir> [--out <output_dir>]
+    pack_submission_zip.py --paper <paper_dir> [--out <output_dir>] [--name <repo_name>]
 
-Reads ``paper.yaml`` (title / paper_version / authors) and packs the *contents*
-of ``build/<paper_version>/package/`` — flat, no wrapper directory — into
-``<title>（<first author Chinese name>）.zip`` (PF-B7 skeleton / venue S19).
+Naming (2026-11-16 用户裁定，GC-2026-1116-02)：
+    产物 zip 名 = **仓库名 + 版本号**，即 ``<repo-name>-<paper_version>.zip``。
+    仓库名按以下优先级取得：``--name`` 显式指定 > 论文仓 git remote origin 的仓名 >
+    PF-B7 传统投稿名 ``<title>（<first author Chinese name>）``（无 remote 时兜底）。
+    PF-B7/venue S19 的传统投稿名仍会随 JSON 输出一并打印，便于编辑部场景取用。
 
 Contract with governance:
   * PF-B7   the package directory is zip-ready; packing is the delivery step.
@@ -23,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -44,7 +47,23 @@ def _first_author(paper: dict) -> str:
     raise SystemExit("paper.yaml carries no authors — cannot derive the zip filename")
 
 
-def pack(paper_dir: Path, out_dir: Path) -> dict:
+def _repo_name(paper_dir: Path) -> str | None:
+    """Repository name from the paper repo's git remote origin (None when absent)."""
+    try:
+        r = subprocess.run(["git", "-C", str(paper_dir), "remote", "get-url", "origin"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    url = r.stdout.strip().rstrip("/")
+    name = url.split("/")[-1]
+    if name.endswith(".git"):
+        name = name[: -len(".git")]
+    return name or None
+
+
+def pack(paper_dir: Path, out_dir: Path, name: str | None = None) -> dict:
     meta = yaml.safe_load((paper_dir / "paper.yaml").read_text(encoding="utf-8"))
     title = meta["title"]
     version = meta["paper_version"]
@@ -56,7 +75,15 @@ def pack(paper_dir: Path, out_dir: Path) -> dict:
                           "hint": "run `paper.py package --paper <dir>` first"}, ensure_ascii=False))
         raise SystemExit(3)
 
-    zip_name = f"{title}（{first}）.zip"
+    repo = name or _repo_name(paper_dir)
+    if repo:
+        zip_name = f"{repo}-{version}.zip"
+        naming = "repo+version"
+    else:
+        # No git remote (e.g. a bare source tree) — fall back to the PF-B7 name.
+        zip_name = f"{title}（{first}）.zip"
+        naming = "pf-b7-title"
+
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / zip_name
 
@@ -77,10 +104,13 @@ def pack(paper_dir: Path, out_dir: Path) -> dict:
     print(json.dumps({
         "status": "ok",
         "zip": zip_name,
+        "naming": naming,
+        "repo": repo,
         "path": str(zip_path),
         "version": version,
         "title": title,
         "first_author": first,
+        "submission_name_pf_b7": f"{title}（{first}）.zip",
         "entries": len(files),
         "bytes": zip_path.stat().st_size,
         "sha256": digest,
@@ -89,11 +119,12 @@ def pack(paper_dir: Path, out_dir: Path) -> dict:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Pack submission zip (PF-B7 / venue S19)")
+    ap = argparse.ArgumentParser(description="Pack submission zip (repo-name + version; PF-B7 fallback)")
     ap.add_argument("--paper", required=True, help="paper workspace directory")
     ap.add_argument("--out", default="dist", help="output directory for the zip")
+    ap.add_argument("--name", default=None, help="explicit repository name for the zip filename")
     args = ap.parse_args()
-    pack(Path(args.paper), Path(args.out))
+    pack(Path(args.paper), Path(args.out), args.name)
 
 
 if __name__ == "__main__":
