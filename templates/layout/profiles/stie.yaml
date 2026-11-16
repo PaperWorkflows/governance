@@ -114,6 +114,11 @@ tables:
     header: 0.72
     bottom: 1.44
   body_pt: 8                            # 2026-11-16 用户裁定：表头与内容行 8pt（比正文略小）
+  # 2026-11-16 用户裁定：列宽按内容自动优化——窄的标签列/数列让位给宽列
+  # （例：P3 表3 第一二列收窄、为第三列释放空间）。content=量各列最宽单元格
+  # （CJK 记 2、拉丁记 1）按页内容宽比例分配，min_column_pct 为单列下限。
+  column_widths: content
+  min_column_pct: 5
   # cell_first_line_indent_chars: 0 —— [JT] 范本实测：表内文字全部顶格（无首行缩进）。
   # 作用于 pandoc Compact 样式（表格单元格段落与紧凑列表段，P1 实测 383 个表格段全部
   # Compact）：Compact basedOn BodyText → Normal，而 Normal 带 firstLineChars=200（正文

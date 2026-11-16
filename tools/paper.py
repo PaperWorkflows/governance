@@ -2480,6 +2480,38 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
         m = re.search(r'<w:sz w:val="(\d+)"', compact)
         check("compact_sz_halfpt", int(round(table_pt * 2)), int(m.group(1)) if m else None)
 
+    # GC-2026-1116-04: content-proportional column widths must actually land —
+    # the grid has to span the text block and no column may fall under the floor.
+    if (merged.get("tables", {}) or {}).get("column_widths", "content") == "content":
+        min_pct = float((merged.get("tables", {}) or {}).get("min_column_pct") or 5.0)
+        pg_w = attr("w:pgSz", "w:w", docxml)
+        mar_l = attr("w:pgMar", "w:left", docxml)
+        mar_r = attr("w:pgMar", "w:right", docxml)
+        if pg_w and mar_l is not None and mar_r is not None:
+            content_w = pg_w - mar_l - mar_r
+            floor_tw = content_w * min_pct / 100.0
+            bad_sum, bad_floor, n_tbl = [], [], 0
+            for tbl in re.findall(r"<w:tbl>.*?</w:tbl>", docxml, flags=re.S):
+                cols = [int(g) for g in re.findall(r'<w:gridCol w:w="(\d+)"/>', tbl)]
+                if not cols:
+                    continue
+                n_tbl += 1
+                if abs(sum(cols) - content_w) > 2:
+                    bad_sum.append({"columns": cols, "sum": sum(cols), "expected": content_w})
+                if cols and min(cols) < floor_tw - 2:
+                    bad_floor.append({"columns": cols, "min": min(cols), "floor": round(floor_tw)})
+            if bad_sum:
+                failures.append({"check": "table_grid_spans_text_block",
+                                 "expected": content_w, "actual": bad_sum[:3]})
+            else:
+                notes.append({"check": "table_grid_spans_text_block", "value": content_w})
+            if bad_floor:
+                failures.append({"check": "table_column_floor_pct",
+                                 "expected": min_pct, "actual": bad_floor[:3]})
+            else:
+                notes.append({"check": "table_column_floor_pct", "value": min_pct,
+                              "tables": n_tbl})
+
     # The math font must be DECLARED in the produced document. pandoc drops
     # m:mathPr from the reference settings.xml, so the build re-applies it; this
     # assertion makes sure that actually happened (the PDF's font is the host's
@@ -2745,8 +2777,126 @@ def _harden_tables(docx_path: Path) -> int:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
         for name, payload in out.items():
             dst.writestr(name, payload)
-    docx_path.write_bytes(_zip_parts(out))
+        docx_path.write_bytes(_zip_parts(out))
     return patched
+
+
+# ── GC-2026-1116-04: content-proportional table column widths ──────────────
+def _cell_units(cell_xml: str) -> float:
+    """Display width of one table cell in character units (CJK = 2, Latin = 1)."""
+    text = "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", cell_xml))
+    return sum(2.0 if ord(ch) > 0x2E80 else 1.0 for ch in text)
+
+
+def _optimize_table_columns(docx_path: Path, policy: str = "content",
+                            min_pct: float = 5.0) -> dict:
+    """Rewrite every table's column widths from measured content.
+
+    pandoc sizes columns from the markdown separator row, so a table written with
+    equal dashes ships with equal columns: a 3-character label column gets the
+    same width as a 100-character description column, and the grid total usually
+    falls short of the text block. This measures each column's widest cell
+    (CJK = 2 units, Latin = 1) and distributes the page content width
+    proportionally, with ``min_pct`` as a per-column floor so a short numeric
+    column cannot collapse (user directive 2026-11-16: P3 TABLE 3's first two
+    columns give their width to the third).
+
+    Tables whose shape is unexpected (no rows, ragged rows, gridSpan) are left
+    untouched and recorded under "skipped" — never silently mangled.
+    """
+    z = zipfile.ZipFile(docx_path)
+    doc = z.read("word/document.xml").decode("utf-8")
+
+    def _attr(tag: str, name: str, xml: str) -> int | None:
+        m = re.search(r"<" + tag + r"\b[^>]*\b" + name + r'="(-?\d+)"', xml)
+        return int(m.group(1)) if m else None
+
+    pg_w = _attr("w:pgSz", "w:w", doc)
+    mar_l = _attr("w:pgMar", "w:left", doc)
+    mar_r = _attr("w:pgMar", "w:right", doc)
+    if not (pg_w and mar_l is not None and mar_r is not None):
+        return {"status": "skipped", "reason": "page geometry not found"}
+    content_w = pg_w - mar_l - mar_r
+
+    tables = re.findall(r"<w:tbl>.*?</w:tbl>", doc, flags=re.S)
+    if not tables:
+        return {"status": "ok", "tables": 0, "note": "no tables"}
+
+    rewritten, skipped = 0, []
+    for tbl in tables:
+        rows = re.findall(r"<w:tr\b.*?</w:tr>", tbl, flags=re.S)
+        if not rows:
+            skipped.append("no rows")
+            continue
+        cells_per_row = [re.findall(r"<w:tc\b.*?</w:tc>", r, flags=re.S) for r in rows]
+        ncol = max(len(c) for c in cells_per_row)
+        if ncol < 2:
+            skipped.append(f"{ncol} column(s)")
+            continue
+        if any(len(c) != ncol for c in cells_per_row):
+            # Ragged (merged) table — the proportional model does not apply.
+            skipped.append("ragged rows")
+            continue
+
+        raw = []
+        for c in range(ncol):
+            widest = max((_cell_units(row[c]) for row in cells_per_row), default=0.0)
+            raw.append(max(widest, 1.0))
+        total_raw = sum(raw)
+        free = 100.0 - min_pct * ncol
+        if free <= 0:  # pathological floor — fall back to equal columns
+            pct = [100.0 / ncol] * ncol
+        else:
+            pct = [min_pct + free * r / total_raw for r in raw]
+
+        widths = [int(round(content_w * p / 100.0)) for p in pct]
+        # Absorb rounding drift into the widest column so the grid is exact.
+        drift = content_w - sum(widths)
+        widths[widths.index(max(widths))] += drift
+
+        # Rewrite tblW to a fixed full-width table and rebuild tblGrid.
+        new_tbl = re.sub(r"<w:tblW\b[^/]*/>",
+                         f'<w:tblW w:type="dxa" w:w="{content_w}"/>', tbl, count=1)
+        grid = "<w:tblGrid>" + "".join(
+            f'<w:gridCol w:w="{w}"/>' for w in widths) + "</w:tblGrid>"
+        if "<w:tblGrid>" in new_tbl:
+            new_tbl = re.sub(r"<w:tblGrid>.*?</w:tblGrid>", grid, new_tbl, count=1, flags=re.S)
+        else:
+            new_tbl = new_tbl.replace("<w:tblPr>", "<w:tblPr>", 1)
+            m = re.search(r"</w:tblPr>", new_tbl)
+            new_tbl = new_tbl[:m.end()] + grid + new_tbl[m.end():]
+
+        # Per-cell widths (tcW is the first child of tcPr; insert tcPr when absent).
+        ci = 0
+        out_parts, pos = [], 0
+        for m in re.finditer(r"<w:tc\b.*?</w:tc>", new_tbl, flags=re.S):
+            out_parts.append(new_tbl[pos:m.start()])
+            cell, col = m.group(0), min(ci, ncol - 1)
+            ci += 1
+            tcw = f'<w:tcW w:type="dxa" w:w="{widths[col]}"/>'
+            if "<w:tcPr>" in cell:
+                cell = cell.replace("<w:tcPr>", "<w:tcPr>" + tcw, 1)
+            elif "<w:tcPr/>" in cell:
+                cell = cell.replace("<w:tcPr/>", f"<w:tcPr>{tcw}</w:tcPr>", 1)
+            else:
+                cell = cell.replace(">", ">" + f"<w:tcPr>{tcw}</w:tcPr>", 1)
+            out_parts.append(cell)
+            pos = m.end()
+        out_parts.append(new_tbl[pos:])
+        new_tbl = "".join(out_parts)
+
+        doc = doc.replace(tbl, new_tbl, 1)
+        rewritten += 1
+
+    out = {}
+    with zipfile.ZipFile(docx_path) as src:
+        for name in src.namelist():
+            out[name] = src.read(name)
+    out["word/document.xml"] = doc.encode("utf-8")
+    docx_path.write_bytes(_zip_parts(out))
+    return {"status": "ok", "tables": len(tables), "rewritten": rewritten,
+            "content_width_twips": content_w, "skipped": skipped}
+
 
 
 # ── GC-2026-1112-01: in-text numeric citations as superscript ────────────────
@@ -3817,6 +3967,13 @@ def _cmd_build_docx_impl(args) -> tuple:
         math_font = (layout["role"].get("fonts", {}).get("math") or (None, None))[1]
         math_applied = _apply_math_font_to_output(output_file, math_font)
         table_rows_hardened = _harden_tables(output_file)
+        # GC-2026-1116-04: content-proportional column widths (profile
+        # tables.column_widths / min_column_pct; "equal" keeps pandoc widths).
+        _tables_cfg = (layout["role"].get("tables") or {})
+        column_widths = _optimize_table_columns(
+            output_file,
+            policy=str(_tables_cfg.get("column_widths") or "content"),
+            min_pct=float(_tables_cfg.get("min_column_pct") or 5.0))
         # GC-2026-1112-01: in-text numeric citations become superscript when the
         # profile declares citation.numeric_superscript (reference list, code and
         # math excluded — see _apply_citation_superscript).

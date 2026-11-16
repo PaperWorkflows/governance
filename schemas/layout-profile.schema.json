@@ -4,7 +4,10 @@
   "description": "Role-based layout profile (L0/L1/L2). additionalProperties: false per PF-B3. GC-2026-1111-02: extended from flat typography to a role/domain model; all pre-existing keys preserved, all new keys optional; missing role keys fall back to typography.body_pt / east_asia_font / latin_font (PF-B10). GC-2026-1112-06: added optional authors domain (author / affiliation / attribution / bio structure); absence of authors (draft.yaml, gbt7713-2-2022.yaml) stays non-blocking for legacy profiles. GC-2026-1112-06 follow-up fix: added optional tables.cell_first_line_indent_chars (integer, minimum 0, default 0) so pandoc Compact table-cell / tight-list paragraphs explicitly cancel Normal's inherited first-line indent (表单元格缩进归零); absence in the three profiles (draft/gbt7713/stie) stays valid and defaults to 0.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["profile", "kind"],
+  "required": [
+    "profile",
+    "kind"
+  ],
   "properties": {
     "profile": {
       "type": "string",
@@ -12,7 +15,11 @@
     },
     "kind": {
       "type": "string",
-      "enum": ["draft", "venue", "paper"],
+      "enum": [
+        "draft",
+        "venue",
+        "paper"
+      ],
       "description": "Profile kind (structure-identity key; L2 must use kind: paper)"
     },
     "target_venue": {
@@ -23,22 +30,47 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Page geometry and margins (structure-identity key, L0/L1 only)",
-      "required": ["size", "margin"],
+      "required": [
+        "size",
+        "margin"
+      ],
       "properties": {
         "size": {
           "type": "string",
-          "enum": ["A4", "A3", "letter", "legal"],
+          "enum": [
+            "A4",
+            "A3",
+            "letter",
+            "legal"
+          ],
           "description": "Paper size"
         },
         "margin": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["top", "bottom", "left", "right"],
+          "required": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ],
           "properties": {
-            "top":    { "type": "number", "description": "Top margin in mm" },
-            "bottom": { "type": "number", "description": "Bottom margin in mm" },
-            "left":   { "type": "number", "description": "Left margin in mm" },
-            "right":  { "type": "number", "description": "Right margin in mm" }
+            "top": {
+              "type": "number",
+              "description": "Top margin in mm"
+            },
+            "bottom": {
+              "type": "number",
+              "description": "Bottom margin in mm"
+            },
+            "left": {
+              "type": "number",
+              "description": "Left margin in mm"
+            },
+            "right": {
+              "type": "number",
+              "description": "Right margin in mm"
+            }
           }
         }
       }
@@ -76,18 +108,44 @@
           "additionalProperties": false,
           "description": "Role-scoped font families; keys omitted fall back to east_asia_font / latin_font",
           "properties": {
-            "title_east_asia":       { "type": "string" },
-            "title_latin":           { "type": "string" },
-            "author_east_asia":      { "type": "string" },
-            "affiliation_east_asia": { "type": "string" },
-            "abstract_east_asia":    { "type": "string" },
-            "heading_east_asia":     { "type": "string" },
-            "heading_latin":         { "type": "string" },
-            "caption_east_asia":     { "type": "string" },
-            "table_body_east_asia":  { "type": "string" },
-            "reference_east_asia":   { "type": "string" },
-            "math_latin":            { "type": "string", "description": "Formula font (e.g., Cambria Math)" },
-            "code_latin":            { "type": "string", "description": "Monospace font for code" }
+            "title_east_asia": {
+              "type": "string"
+            },
+            "title_latin": {
+              "type": "string"
+            },
+            "author_east_asia": {
+              "type": "string"
+            },
+            "affiliation_east_asia": {
+              "type": "string"
+            },
+            "abstract_east_asia": {
+              "type": "string"
+            },
+            "heading_east_asia": {
+              "type": "string"
+            },
+            "heading_latin": {
+              "type": "string"
+            },
+            "caption_east_asia": {
+              "type": "string"
+            },
+            "table_body_east_asia": {
+              "type": "string"
+            },
+            "reference_east_asia": {
+              "type": "string"
+            },
+            "math_latin": {
+              "type": "string",
+              "description": "Formula font (e.g., Cambria Math)"
+            },
+            "code_latin": {
+              "type": "string",
+              "description": "Monospace font for code"
+            }
           }
         },
         "sizes": {
@@ -95,30 +153,102 @@
           "additionalProperties": false,
           "description": "Role font-size table in points; keys omitted fall back to body_pt",
           "properties": {
-            "title_zh":          { "type": "number", "exclusiveMinimum": 0 },
-            "title_en":          { "type": "number", "exclusiveMinimum": 0 },
-            "author":            { "type": "number", "exclusiveMinimum": 0 },
-            "affiliation":       { "type": "number", "exclusiveMinimum": 0 },
-            "abstract":          { "type": "number", "exclusiveMinimum": 0 },
-            "abstract_label":    { "type": "number", "exclusiveMinimum": 0 },
-            "keywords":          { "type": "number", "exclusiveMinimum": 0 },
-            "heading1":          { "type": "number", "exclusiveMinimum": 0 },
-            "heading2":          { "type": "number", "exclusiveMinimum": 0 },
-            "heading3":          { "type": "number", "exclusiveMinimum": 0 },
-            "heading4":          { "type": "number", "exclusiveMinimum": 0 },
-            "heading5":          { "type": "number", "exclusiveMinimum": 0 },
-            "body":              { "type": "number", "exclusiveMinimum": 0 },
-            "caption":           { "type": "number", "exclusiveMinimum": 0 },
-            "table_body":        { "type": "number", "exclusiveMinimum": 0 },
-            "table_note":        { "type": "number", "exclusiveMinimum": 0 },
-            "reference_heading": { "type": "number", "exclusiveMinimum": 0 },
-            "reference_entry":   { "type": "number", "exclusiveMinimum": 0 },
-            "footnote":          { "type": "number", "exclusiveMinimum": 0 },
-            "author_bio":        { "type": "number", "exclusiveMinimum": 0 },
-            "funding":           { "type": "number", "exclusiveMinimum": 0 },
-            "page_number":       { "type": "number", "exclusiveMinimum": 0 },
-            "header":            { "type": "number", "exclusiveMinimum": 0 },
-            "code":              { "type": "number", "exclusiveMinimum": 0 }
+            "title_zh": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "title_en": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "author": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "affiliation": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "abstract": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "abstract_label": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "keywords": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "heading1": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "heading2": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "heading3": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "heading4": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "heading5": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "body": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "caption": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "table_body": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "table_note": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "reference_heading": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "reference_entry": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "footnote": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "author_bio": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "funding": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "page_number": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "header": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "code": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
           }
         },
         "paragraph": {
@@ -127,11 +257,21 @@
           "properties": {
             "alignment": {
               "type": "string",
-              "enum": ["justify", "left", "center"],
+              "enum": [
+                "justify",
+                "left",
+                "center"
+              ],
               "description": "Body paragraph alignment"
             },
-            "spacing_before_pt": { "type": "number", "minimum": 0 },
-            "spacing_after_pt":  { "type": "number", "minimum": 0 }
+            "spacing_before_pt": {
+              "type": "number",
+              "minimum": 0
+            },
+            "spacing_after_pt": {
+              "type": "number",
+              "minimum": 0
+            }
           }
         },
         "heading_bold": {
@@ -144,23 +284,40 @@
         },
         "abstract_label_alignment": {
           "type": "string",
-          "enum": ["left", "center", "right"],
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ],
           "description": "Alignment of the abstract/keywords label paragraphs (AbstractTitle style: 摘要/Abstract/关键词/Keywords). GC-2026-1112-01: left-aligned, not centered. Absent = generator default (center)"
         },
         "heading_numbering": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "max_level":              { "type": "integer", "minimum": 1, "maximum": 9 },
-            "recommended_max_level":  { "type": "integer", "minimum": 1, "maximum": 9 },
+            "max_level": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9
+            },
+            "recommended_max_level": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9
+            },
             "formats": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Per-level numbering format strings, e.g., [\"%1\", \"%1.%2\", \"%1.%2.%3\", \"（%4）\", \"⑤\"]"
             },
             "indent": {
               "type": "string",
-              "enum": ["flush_left", "indented"],
+              "enum": [
+                "flush_left",
+                "indented"
+              ],
               "description": "Heading number alignment: flush_left per venue S8 / GB/T 7713.2 section 5.2.2"
             },
             "number_title_gap_chars": {
@@ -179,14 +336,36 @@
       "properties": {
         "caption_position": {
           "type": "string",
-          "enum": ["above", "below"],
+          "enum": [
+            "above",
+            "below"
+          ],
           "description": "below per GB/T 7713.2-2022 section 5.4.3"
         },
-        "caption_pt":               { "type": "number", "exclusiveMinimum": 0 },
-        "caption_alignment":        { "type": "string", "enum": ["center", "left", "justify"] },
-        "text_first":               { "type": "boolean", "description": "Text before figure/table in body (venue S11)" },
-        "cross_reference_required": { "type": "boolean", "description": "Every figure/table number must be cited in body (venue S11 / GB/T 7713.2 section 5.2.4)" },
-        "caption_bilingual":        { "type": "boolean", "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文图题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical." }
+        "caption_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "caption_alignment": {
+          "type": "string",
+          "enum": [
+            "center",
+            "left",
+            "justify"
+          ]
+        },
+        "text_first": {
+          "type": "boolean",
+          "description": "Text before figure/table in body (venue S11)"
+        },
+        "cross_reference_required": {
+          "type": "boolean",
+          "description": "Every figure/table number must be cited in body (venue S11 / GB/T 7713.2 section 5.2.4)"
+        },
+        "caption_bilingual": {
+          "type": "boolean",
+          "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文图题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical."
+        }
       }
     },
     "tables": {
@@ -196,44 +375,114 @@
       "properties": {
         "caption_position": {
           "type": "string",
-          "enum": ["above", "below"],
+          "enum": [
+            "above",
+            "below"
+          ],
           "description": "above per GB/T 7713.2-2022 section 5.5.3 / CY/T 170-2019 section 7.2.1.1"
         },
-        "caption_pt":            { "type": "number", "exclusiveMinimum": 0 },
-        "caption_alignment":     { "type": "string", "enum": ["center", "left", "justify"] },
+        "caption_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "caption_alignment": {
+          "type": "string",
+          "enum": [
+            "center",
+            "left",
+            "justify"
+          ]
+        },
         "style": {
           "type": "string",
-          "enum": ["three_line", "grid", "none"],
+          "enum": [
+            "three_line",
+            "grid",
+            "none"
+          ],
           "description": "three_line per CY/T 170-2019 section 5.2"
         },
         "border_widths_pt": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["top", "header", "bottom"],
+          "required": [
+            "top",
+            "header",
+            "bottom"
+          ],
           "properties": {
-            "top":    { "type": "number", "exclusiveMinimum": 0 },
-            "header": { "type": "number", "exclusiveMinimum": 0 },
-            "bottom": { "type": "number", "exclusiveMinimum": 0 }
+            "top": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "header": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "bottom": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
           }
         },
-        "header_fill":           { "type": "string", "pattern": "^(?:#[0-9A-Fa-f]{6}|none)$", "description": "Header-row cell background fill: a hex colour (e.g. \"#E5EBF0\") or \"none\". Absent = none (no w:shd written). Journal-measured 2026-11-12: 范文表头浅灰底 RGB(0.898,0.922,0.941) ≈ #E5EBF0, 黑字." },
-        "caption_bilingual":     { "type": "boolean", "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文表题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical." },
-        "body_pt":               { "type": "number", "exclusiveMinimum": 0 },
+        "header_fill": {
+          "type": "string",
+          "pattern": "^(?:#[0-9A-Fa-f]{6}|none)$",
+          "description": "Header-row cell background fill: a hex colour (e.g. \"#E5EBF0\") or \"none\". Absent = none (no w:shd written). Journal-measured 2026-11-12: 范文表头浅灰底 RGB(0.898,0.922,0.941) ≈ #E5EBF0, 黑字."
+        },
+        "caption_bilingual": {
+          "type": "boolean",
+          "description": "Captions are provided as a Chinese/English pair (journal-measured 2026-11-12: 范文表题中英成对). Absent/false = single-language caption; bilingual text itself is a writing-layer concern, the style stays identical."
+        },
+        "body_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "cell_first_line_indent_chars": {
           "type": "integer",
           "minimum": 0,
           "default": 0,
           "description": "First-line indent (CJK char widths) of pandoc Compact table-cell / tight-list paragraphs. GC-2026-1112-06 follow-up fix: pandoc's Compact inherits Normal's 2-char body indent via BodyText (Normal carries w:firstLineChars='200'), so table cell text (and tight list items) rendered with a 2-char first-line indent against the template (表内文字顶格). This key makes compaction prescribe the effective indent explicitly on the Compact style, overriding the inherited body indent; default 0 (flush). Absent = 0."
         },
-        "header_alignment":      { "type": "string", "enum": ["center", "left"] },
-        "note_position":         { "type": "string", "enum": ["below_table", "above_table"] }
+        "header_alignment": {
+          "type": "string",
+          "enum": [
+            "center",
+            "left"
+          ]
+        },
+        "note_position": {
+          "type": "string",
+          "enum": [
+            "below_table",
+            "above_table"
+          ]
+        },
+        "column_widths": {
+          "type": "string",
+          "enum": [
+            "content",
+            "equal"
+          ],
+          "default": "content",
+          "description": "Column-width policy applied to every table at build time. content = measure each column's widest cell (CJK=2 units, Latin=1) and distribute the page content width proportionally with min_column_pct as the floor; equal = keep pandoc's equal widths. User directive 2026-11-16 (P3 TABLE 3: narrow the label/number columns, give the width to the description column)."
+        },
+        "min_column_pct": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 50,
+          "default": 5,
+          "description": "Floor percentage of the table width for any single column under column_widths=content, so a short numeric column cannot collapse."
+        }
       }
     },
     "formulas": {
       "type": "object",
       "additionalProperties": false,
       "description": "Formula rendering settings (structure-identity key, L0/L1 only)",
-      "required": ["renderer"],
+      "required": [
+        "renderer"
+      ],
       "properties": {
         "renderer": {
           "type": "string",
@@ -245,23 +494,70 @@
         },
         "display": {
           "type": "string",
-          "enum": ["centered", "inline_text"],
+          "enum": [
+            "centered",
+            "inline_text"
+          ],
           "description": "Display equation alignment (centered per GB/T 7713.2-2022 section 5.7.4)"
         },
         "numbering": {
           "type": "string",
-          "enum": ["right_paren", "right_dot_leader", "none"],
+          "enum": [
+            "right_paren",
+            "right_dot_leader",
+            "none"
+          ],
           "description": "Equation numbering: right-aligned (1) per GB/T 7713.2-2022 section 5.7.4"
         },
         "symbol_styles": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "variable":              { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
-            "unit":                  { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
-            "function":              { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
-            "matrix_vector_tensor":  { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] },
-            "number_set":            { "type": "string", "enum": ["italic", "upright", "bold_italic", "bold_upright"] }
+            "variable": {
+              "type": "string",
+              "enum": [
+                "italic",
+                "upright",
+                "bold_italic",
+                "bold_upright"
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "enum": [
+                "italic",
+                "upright",
+                "bold_italic",
+                "bold_upright"
+              ]
+            },
+            "function": {
+              "type": "string",
+              "enum": [
+                "italic",
+                "upright",
+                "bold_italic",
+                "bold_upright"
+              ]
+            },
+            "matrix_vector_tensor": {
+              "type": "string",
+              "enum": [
+                "italic",
+                "upright",
+                "bold_italic",
+                "bold_upright"
+              ]
+            },
+            "number_set": {
+              "type": "string",
+              "enum": [
+                "italic",
+                "upright",
+                "bold_italic",
+                "bold_upright"
+              ]
+            }
           },
           "description": "Four-class symbol fonts per venue S10 / GB 3100-3102"
         }
@@ -271,7 +567,9 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Citation style settings (structure-identity key, L0/L1 only)",
-      "required": ["style"],
+      "required": [
+        "style"
+      ],
       "properties": {
         "style": {
           "type": "string",
@@ -279,17 +577,32 @@
         },
         "system": {
           "type": "string",
-          "enum": ["numeric", "author_date"],
+          "enum": [
+            "numeric",
+            "author_date"
+          ],
           "description": "Reference marking system (venue S13: author_date)"
         },
         "entry_order": {
           "type": "string",
-          "enum": ["author_year_first", "standard"],
+          "enum": [
+            "author_year_first",
+            "standard"
+          ],
           "description": "Entry field order; venue S16 places author, year first (differs from GB/T 7714 default order)"
         },
-        "standard_edition":       { "type": "string", "description": "e.g., GB/T 7714-2015 (as cited by venue) or GB/T 7714-2025 (current)" },
-        "standard_edition_note":  { "type": "string" },
-        "preferred_recency_years":{ "type": "integer", "minimum": 0, "description": "Prefer references published within N years (venue S13: 5)" },
+        "standard_edition": {
+          "type": "string",
+          "description": "e.g., GB/T 7714-2015 (as cited by venue) or GB/T 7714-2025 (current)"
+        },
+        "standard_edition_note": {
+          "type": "string"
+        },
+        "preferred_recency_years": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Prefer references published within N years (venue S13: 5)"
+        },
         "numeric_superscript": {
           "type": "boolean",
           "description": "In-text numeric citations [N] / [1,3] / [2-5] render as superscript (GC-2026-1112-01; common practice for GB/T 7714 numeric citations, user directive 2026-11-12). Reference-list entries (Bibliography), code, and OMML math are excluded; 4-digit numbers (e.g. access dates [2026-11-11]) and comma-space interval forms ([12, 40]) never match. Absent = no superscripting"
@@ -299,20 +612,43 @@
           "additionalProperties": false,
           "description": "In-text citation forms (venue S14); full-width for Chinese, half-width for English",
           "properties": {
-            "zh_single":   { "type": "string" },
-            "zh_double":   { "type": "string" },
-            "zh_multi":    { "type": "string" },
-            "en_single":   { "type": "string" },
-            "en_double":   { "type": "string" },
-            "en_multi":    { "type": "string" },
-            "same_author_same_year_suffix": { "type": "string", "description": "e.g., a/b/c after year" },
-            "repeat_citation_page":         { "type": "string", "description": "superscript page after year" },
-            "joint_corporate_separator":    { "type": "string", "description": "Separator between joint corporate (institutional) authors in Chinese in-text citations, e.g., the 、 in 中共中央、国务院 (venue S14 covers natural-person forms only; project fallback per official-document joint-signature convention and P3/P8 current practice; natural-person double authors keep 和 per S14). GC-2026-1114-02." }
+            "zh_single": {
+              "type": "string"
+            },
+            "zh_double": {
+              "type": "string"
+            },
+            "zh_multi": {
+              "type": "string"
+            },
+            "en_single": {
+              "type": "string"
+            },
+            "en_double": {
+              "type": "string"
+            },
+            "en_multi": {
+              "type": "string"
+            },
+            "same_author_same_year_suffix": {
+              "type": "string",
+              "description": "e.g., a/b/c after year"
+            },
+            "repeat_citation_page": {
+              "type": "string",
+              "description": "superscript page after year"
+            },
+            "joint_corporate_separator": {
+              "type": "string",
+              "description": "Separator between joint corporate (institutional) authors in Chinese in-text citations, e.g., the 、 in 中共中央、国务院 (venue S14 covers natural-person forms only; project fallback per official-document joint-signature convention and P3/P8 current practice; natural-person double authors keep 和 per S14). GC-2026-1114-02."
+            }
           }
         },
         "fallback_entry_forms": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Reference-entry templates for the four venue-silent document types: keys law [Z] / regulation [Z] / standard [S] / standard_online [S/OL]; online law/policy text follows venue template ④ [EB/OL] by cross-reference and is NOT registered here (single source of truth). Values are {placeholder} templates forming the machine-checkable binding source (PF-W6). Venue-specified templates (专著[M]/期刊[J]/会议[C]∥/预印本[EB/OL]) are not duplicated here. GC-2026-1114-01."
         }
       }
@@ -324,14 +660,35 @@
       "properties": {
         "order": {
           "type": "array",
-          "items": { "type": "string", "enum": ["zh_by_pinyin", "en_by_surname", "appearance"] },
+          "items": {
+            "type": "string",
+            "enum": [
+              "zh_by_pinyin",
+              "en_by_surname",
+              "appearance"
+            ]
+          },
           "description": "List ordering; venue S15: [zh_by_pinyin, en_by_surname] (Chinese first, then English)"
         },
-        "heading_pt":        { "type": "number", "exclusiveMinimum": 0 },
-        "entry_pt":          { "type": "number", "exclusiveMinimum": 0 },
-        "hanging_indent":    { "type": "boolean" },
-        "hanging_indent_cm": { "type": "number", "exclusiveMinimum": 0 },
-        "entry_spacing_pt":  { "type": "number", "minimum": 0 }
+        "heading_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "entry_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "hanging_indent": {
+          "type": "boolean"
+        },
+        "hanging_indent_cm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "entry_spacing_pt": {
+          "type": "number",
+          "minimum": 0
+        }
       }
     },
     "pagination": {
@@ -341,15 +698,27 @@
       "properties": {
         "page_number_position": {
           "type": "string",
-          "enum": ["footer_center", "footer_right", "header_right", "none"],
+          "enum": [
+            "footer_center",
+            "footer_right",
+            "header_right",
+            "none"
+          ],
           "description": "footer_center per GB/T 3179-2009 section 8.6"
         },
         "header": {
           "type": "string",
-          "enum": ["title_center", "journal", "none"],
+          "enum": [
+            "title_center",
+            "journal",
+            "none"
+          ],
           "description": "Running head: paper title centered per GB/T 3179-2009 section 9.2"
         },
-        "header_pt": { "type": "number", "exclusiveMinimum": 0 }
+        "header_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "punctuation": {
@@ -357,10 +726,26 @@
       "additionalProperties": false,
       "description": "CJK punctuation width rules (GB/T 15834-2011)",
       "properties": {
-        "dash_em":               { "type": "number", "description": "Em width of dash —— (2)" },
-        "ellipsis_em":           { "type": "number", "description": "Em width of ellipsis …… (2)" },
-        "interpunct_em":         { "type": "number", "description": "Em width of interpunct · (0.5)" },
-        "line_end_compression":  { "type": "string", "enum": ["half_width", "full_width", "none"] }
+        "dash_em": {
+          "type": "number",
+          "description": "Em width of dash —— (2)"
+        },
+        "ellipsis_em": {
+          "type": "number",
+          "description": "Em width of ellipsis …… (2)"
+        },
+        "interpunct_em": {
+          "type": "number",
+          "description": "Em width of interpunct · (0.5)"
+        },
+        "line_end_compression": {
+          "type": "string",
+          "enum": [
+            "half_width",
+            "full_width",
+            "none"
+          ]
+        }
       }
     },
     "author_bio_layout": {
@@ -368,9 +753,17 @@
       "additionalProperties": false,
       "description": "Author-bio block typography (venue S17 role)",
       "properties": {
-        "pt":                     { "type": "number", "exclusiveMinimum": 0 },
-        "first_line_indent_chars":{ "type": "number", "minimum": 0 },
-        "one_paragraph_per_author": { "type": "boolean" }
+        "pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "first_line_indent_chars": {
+          "type": "number",
+          "minimum": 0
+        },
+        "one_paragraph_per_author": {
+          "type": "boolean"
+        }
       }
     },
     "authors": {
@@ -393,7 +786,10 @@
       "properties": {
         "affiliation_style": {
           "type": "string",
-          "enum": ["numbered_superscript", "inline_parenthesized"],
+          "enum": [
+            "numbered_superscript",
+            "inline_parenthesized"
+          ],
           "description": "Affiliation reference style. numbered_superscript = superscript unit indices after author names (journal-measured template 2026-11-12; per PF-W12 this measured form takes precedence over venue S2, registered as a deviation in stie.yaml). inline_parenthesized = the written venue S2 form '作者姓名（一级单位全称 二级单位全称，所在市 邮编）', kept as the original wording. 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements numbered_superscript; inline_parenthesized requires generator development."
         },
         "corresponding_mark": {
@@ -402,7 +798,10 @@
         },
         "corresponding_mark_position": {
           "type": "string",
-          "enum": ["after_numbers", "after_name"],
+          "enum": [
+            "after_numbers",
+            "after_name"
+          ],
           "description": "Position of the corresponding mark among superscripts. after_numbers = tail of the unit-number list ('1,2,*', journal-measured); after_name = directly after the name."
         },
         "name_separator_zh": {
@@ -419,7 +818,11 @@
         },
         "affiliation_list_alignment": {
           "type": "string",
-          "enum": ["center", "left", "justify"],
+          "enum": [
+            "center",
+            "left",
+            "justify"
+          ],
           "description": "Alignment of the affiliation-number list paragraph(s) (journal-measured: center, wraps centered). 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements center; switching requires generator development."
         },
         "front_order": {
@@ -427,7 +830,19 @@
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "enum": ["title_zh", "authors_zh", "affiliations_zh", "abstract", "keywords", "funding", "title_en", "authors_en", "affiliations_en", "abstract_en", "keywords_en"]
+            "enum": [
+              "title_zh",
+              "authors_zh",
+              "affiliations_zh",
+              "abstract",
+              "keywords",
+              "funding",
+              "title_en",
+              "authors_en",
+              "affiliations_en",
+              "abstract_en",
+              "keywords_en"
+            ]
           },
           "description": "Front-page top-to-bottom block order (journal-measured, extract-report section 2 line-by-line record)"
         },
@@ -441,14 +856,23 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "enum": ["front", "back"]
+            "enum": [
+              "front",
+              "back"
+            ]
           },
           "description": "Where the funding block is rendered. front = first page (after keywords, journal-measured); back = first paragraph of the end-of-paper author-info section. Journal-measured duplication: [front, back]."
         },
         "bio_section": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["heading", "position", "paragraph_labels", "bio_field_order", "other_author_reduced_fields"],
+          "required": [
+            "heading",
+            "position",
+            "paragraph_labels",
+            "bio_field_order",
+            "other_author_reduced_fields"
+          ],
           "properties": {
             "heading": {
               "type": "string",
@@ -456,18 +880,38 @@
             },
             "position": {
               "type": "string",
-              "enum": ["after_references", "before_references"],
+              "enum": [
+                "after_references",
+                "before_references"
+              ],
               "description": "Placement of the author-info section relative to the reference list (journal-measured: after_references). 声明键 (GC-2026-1112-06 final-review rework P2-3): the generator currently implements after_references; before_references requires generator development."
             },
             "paragraph_labels": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["funding", "first_author", "corresponding", "other_authors"],
+              "required": [
+                "funding",
+                "first_author",
+                "corresponding",
+                "other_authors"
+              ],
               "properties": {
-                "funding":        { "type": "string", "description": "Label of the funding paragraph (journal-measured: '基金项目')" },
-                "first_author":   { "type": "string", "description": "Label of the first-author paragraph (journal-measured: '作者简介')" },
-                "corresponding":  { "type": "string", "description": "Label of the corresponding-author paragraph, mark included (journal-measured: '通信作者*')" },
-                "other_authors":  { "type": "string", "description": "Label of the merged other-authors paragraph (journal-measured: '其他作者')" }
+                "funding": {
+                  "type": "string",
+                  "description": "Label of the funding paragraph (journal-measured: '基金项目')"
+                },
+                "first_author": {
+                  "type": "string",
+                  "description": "Label of the first-author paragraph (journal-measured: '作者简介')"
+                },
+                "corresponding": {
+                  "type": "string",
+                  "description": "Label of the corresponding-author paragraph, mark included (journal-measured: '通信作者*')"
+                },
+                "other_authors": {
+                  "type": "string",
+                  "description": "Label of the merged other-authors paragraph (journal-measured: '其他作者')"
+                }
               }
             },
             "bio_field_order": {
@@ -475,7 +919,20 @@
               "uniqueItems": true,
               "items": {
                 "type": "string",
-                "enum": ["出生年", "性别", "籍贯", "学位", "职称", "单位", "研究方向", "通信地址", "邮政编码", "电子邮箱", "电话", "从事工作"]
+                "enum": [
+                  "出生年",
+                  "性别",
+                  "籍贯",
+                  "学位",
+                  "职称",
+                  "单位",
+                  "研究方向",
+                  "通信地址",
+                  "邮政编码",
+                  "电子邮箱",
+                  "电话",
+                  "从事工作"
+                ]
               },
               "description": "Field order of the full first-author bio (S17 field list plus '单位' between '职称' and '研究方向', journal-measured). '单位' is not a bio object key; the generator resolves it from affiliation_ids through the affiliations registry."
             },
@@ -484,7 +941,12 @@
               "uniqueItems": true,
               "items": {
                 "type": "string",
-                "enum": ["出生年", "性别", "单位", "从事工作"]
+                "enum": [
+                  "出生年",
+                  "性别",
+                  "单位",
+                  "从事工作"
+                ]
               },
               "description": "Reduced fields for the merged other-authors paragraph (journal-measured: birth year, gender, affiliation, work focus)"
             },
@@ -493,7 +955,20 @@
               "uniqueItems": true,
               "items": {
                 "type": "string",
-                "enum": ["出生年", "性别", "籍贯", "学位", "职称", "单位", "研究方向", "通信地址", "邮政编码", "电子邮箱", "电话", "从事工作"]
+                "enum": [
+                  "出生年",
+                  "性别",
+                  "籍贯",
+                  "学位",
+                  "职称",
+                  "单位",
+                  "研究方向",
+                  "通信地址",
+                  "邮政编码",
+                  "电子邮箱",
+                  "电话",
+                  "从事工作"
+                ]
               },
               "description": "Field order of the corresponding-author simple bio (GC-2026-1112-06 final-review rework P2-4). 范本八字段简式：无籍贯/学位/职称；电子邮箱、电话在通信地址之前；地址与邮编合写「通信地址：<addr>，邮政编码 <pc>」。缺省时生成器回落 CORRESPONDING_BIO_FIELDS（同八字段）。OPTIONAL additive key — profiles without it remain valid."
             }
