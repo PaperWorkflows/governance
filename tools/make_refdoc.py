@@ -698,9 +698,19 @@ def build_refdoc(profile_name: str, base_bytes: bytes) -> tuple[bytes, dict]:
     # Compact's indent explicitly from tables.cell_first_line_indent_chars (default
     # 0) so the override lands without touching body-style paragraphs.
     compact_indent = (role["tables"] or {}).get("cell_first_line_indent_chars", 0)
-    styles = _patch_style(styles, "Compact",
-                          ppr={"first_line_chars": compact_indent,
-                               "first_line_pt": 0})
+    # GC-2026-1116-03: table cells (header row AND content rows) carry the table
+    # font size. pandoc renders every table cell with the Compact paragraph style,
+    # so the size must land on Compact — without it the cells silently inherit the
+    # body size (observed 2026-11-16: profile declared 9pt, delivered 10.5pt).
+    # Source of truth: tables.body_pt, falling back to typography.sizes.table_body.
+    tables_cfg = role["tables"] or {}
+    table_pt = tables_cfg.get("body_pt")
+    if table_pt is None:
+        table_pt = (role.get("sizes") or {}).get("table_body")
+    compact_kwargs = {"ppr": {"first_line_chars": compact_indent, "first_line_pt": 0}}
+    if table_pt:
+        compact_kwargs["rpr"] = {"fonts": role["fonts"]["table_body"], "size_pt": table_pt}
+    styles = _patch_style(styles, "Compact", **compact_kwargs)
     styles = _patch_style(styles, "Title",
                            rpr={"fonts": f["title"], "size_pt": s.get("title_zh"), "black": True},
                            ppr={"align": "center", "first_line_chars": 0, "first_line_pt": 0,

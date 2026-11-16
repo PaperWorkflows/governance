@@ -2465,7 +2465,20 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
         m = re.search(r'w:ascii="([^"]+)"', normal)
         check("normal_latin_font", latin, m.group(1) if m else None)
         m_h = re.search(r'w:hAnsi="([^"]+)"', normal)
-        check("normal_latin_font_hAnsi", latin, m_h.group(1) if m_h else None)
+        check("normal_latin_font_hAnsi", latin, m_h.group(1) if m else None)
+
+    # GC-2026-1116-03: table cells (header row + content rows) must carry the table
+    # font size. pandoc renders every table cell with the Compact paragraph style,
+    # so the size has to land there; before this change the profile declared a table
+    # size that never reached the document (cells silently inherited the body size).
+    tables_cfg = merged.get("tables", {}) or {}
+    table_pt = tables_cfg.get("body_pt")
+    if table_pt is None:
+        table_pt = sizes.get("table_body")
+    if table_pt:
+        compact = _style_block(styles, "Compact")
+        m = re.search(r'<w:sz w:val="(\d+)"', compact)
+        check("compact_sz_halfpt", int(round(table_pt * 2)), int(m.group(1)) if m else None)
 
     # The math font must be DECLARED in the produced document. pandoc drops
     # m:mathPr from the reference settings.xml, so the build re-applies it; this
