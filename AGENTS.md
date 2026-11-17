@@ -80,4 +80,14 @@ Common requirements are defined once in [rule-index.yaml](governance/rule-index.
 
 ---
 
-*F1–F9 are PaperFactory's public governance principles. Mode-specific execution rules are in separate governance files.*
+## F10 Git Safety
+
+- Git operations execute only inside the target repository. `git init` anywhere else, absent main-session or user instruction, is prohibited; a "not a git repository" error means the invocation is wrong — stop and report, never create a repository to make a command succeed.
+- Before every commit, verify with `git rev-parse --show-toplevel` that the repository root equals the target repository directory, and include that output in the execution report.
+- `.git` directories are repository identity, not obstacles. Deleting, moving, or renaming any `.git` is prohibited; an embedded-repository error means stop and report, never bypass.
+- Destructive Git commands (`reset --hard`, `clean -fd`, forced checkout, forced push, history rewriting) require explicit per-invocation authorization from the main session or the user.
+- Subagents report Git operations verbatim — command, working directory, and toplevel verification. Executable detail: `governance/git-safety.md` (PF-G1–PF-G6).
+
+---
+
+*F1–F10 are PaperFactory's public governance principles. Mode-specific execution rules are in separate governance files.*

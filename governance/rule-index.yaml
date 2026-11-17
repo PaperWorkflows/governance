@@ -1,5 +1,5 @@
 schema_version: 1
-rules_version: 0.3.7
+rules_version: 0.4.0
 notice: Structure parseable does not prove rules executed; current tools only check index and file structure.
 
 rules:
@@ -39,6 +39,10 @@ rules:
   - id: F9
     file: AGENTS.md
     title: Governance Change Discipline
+    review_roles: [governance]
+  - id: F10
+    file: AGENTS.md
+    title: Git Safety
     review_roles: [governance]
 
   # ── Mode-specific rules ────────────────────────────────────────
@@ -349,3 +353,29 @@ rules:
     file: governance/polish.md
     title: Venue Writing-Standard Polish
     review_roles: [R-A, R-C]
+
+  # ── Git safety rules (governance/git-safety.md, GC-2026-1117-06) ──
+  - id: PF-G1
+    file: governance/git-safety.md
+    title: Repository Boundary
+    review_roles: [governance]
+  - id: PF-G2
+    file: governance/git-safety.md
+    title: No Repository Creation
+    review_roles: [governance]
+  - id: PF-G3
+    file: governance/git-safety.md
+    title: .git Protection
+    review_roles: [governance]
+  - id: PF-G4
+    file: governance/git-safety.md
+    title: Destructive Commands
+    review_roles: [governance]
+  - id: PF-G5
+    file: governance/git-safety.md
+    title: Verbatim Reporting
+    review_roles: [governance]
+  - id: PF-G6
+    file: governance/git-safety.md
+    title: Dispatch Contract
+    review_roles: [governance]
