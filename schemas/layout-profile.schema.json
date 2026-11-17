@@ -641,6 +641,18 @@
             "joint_corporate_separator": {
               "type": "string",
               "description": "Separator between joint corporate (institutional) authors in Chinese in-text citations, e.g., the 、 in 中共中央、国务院 (venue S14 covers natural-person forms only; project fallback per official-document joint-signature convention and P3/P8 current practice; natural-person double authors keep 和 per S14). GC-2026-1114-02."
+            },
+            "zh_paren_single": {
+              "type": "string",
+              "description": "Chinese parenthetical in-text citation (single author), e.g., （张三，2020）(journal-measured prototype P1 build-record L2481-2482: both parenthetical and narrative forms observed; venue S14 examples are narrative only, parenthetical is prototype-empirical PF-W12; coexists with en_halfwidth parenthetical, GC-2026-1117-04)."
+            },
+            "zh_paren_double": {
+              "type": "string",
+              "description": "Chinese parenthetical in-text citation (double author), e.g., （张三和李四，2020）(同 zh_paren_single provenance; author-separator uses 和 consistent with zh_double; with en_double &  coexists, GC-2026-1117-04)."
+            },
+            "zh_paren_multi": {
+              "type": "string",
+              "description": "Chinese parenthetical in-text citation (multi-author), e.g., （张等，2020）(同 zh_paren_single provenance; 等 consistent with zh_multi narrative; GC-2026-1117-04)."
             }
           }
         },
@@ -870,9 +882,9 @@
             "heading",
             "position",
             "paragraph_labels",
-            "bio_field_order",
-            "other_author_reduced_fields"
+            "bio_field_order"
           ],
+          "description": "GC-2026-1117-09: removed other_author_reduced_fields and corresponding_bio_fields; 三档简介统一为 bio_field_order 全字段同式。",
           "properties": {
             "heading": {
               "type": "string",
@@ -935,42 +947,6 @@
                 ]
               },
               "description": "Field order of the full first-author bio (S17 field list plus '单位' between '职称' and '研究方向', journal-measured). '单位' is not a bio object key; the generator resolves it from affiliation_ids through the affiliations registry."
-            },
-            "other_author_reduced_fields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "enum": [
-                  "出生年",
-                  "性别",
-                  "单位",
-                  "从事工作"
-                ]
-              },
-              "description": "Reduced fields for the merged other-authors paragraph (journal-measured: birth year, gender, affiliation, work focus)"
-            },
-            "corresponding_bio_fields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "enum": [
-                  "出生年",
-                  "性别",
-                  "籍贯",
-                  "学位",
-                  "职称",
-                  "单位",
-                  "研究方向",
-                  "通信地址",
-                  "邮政编码",
-                  "电子邮箱",
-                  "电话",
-                  "从事工作"
-                ]
-              },
-              "description": "Field order of the corresponding-author simple bio (GC-2026-1112-06 final-review rework P2-4). 范本八字段简式：无籍贯/学位/职称；电子邮箱、电话在通信地址之前；地址与邮编合写「通信地址：<addr>，邮政编码 <pc>」。缺省时生成器回落 CORRESPONDING_BIO_FIELDS（同八字段）。OPTIONAL additive key — profiles without it remain valid."
             }
           }
         }

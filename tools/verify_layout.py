@@ -95,6 +95,9 @@ def section_b() -> None:
     baseline["properties"]["citation"]["properties"].pop("numeric_superscript", None)  # GC-2026-1112-01
     baseline["properties"]["citation"]["properties"].pop("fallback_entry_forms", None)  # GC-2026-1114-01
     baseline["properties"]["citation"]["properties"]["in_text_forms"]["properties"].pop("joint_corporate_separator", None)  # GC-2026-1114-02
+    baseline["properties"]["citation"]["properties"]["in_text_forms"]["properties"].pop("zh_paren_single", None)  # GC-2026-1117-04
+    baseline["properties"]["citation"]["properties"]["in_text_forms"]["properties"].pop("zh_paren_double", None)  # GC-2026-1117-04
+    baseline["properties"]["citation"]["properties"]["in_text_forms"]["properties"].pop("zh_paren_multi", None)  # GC-2026-1117-04
     validator = jsonschema.Draft7Validator(baseline)
     detail = []
     ok = True

@@ -157,6 +157,9 @@ citation:
     same_author_same_year_suffix: "a/b/c"  # 年份后加 a、b、c
     repeat_citation_page: "superscript"    # 出版年后角标著录引文页码
     joint_corporate_separator: "、"        # [SC] 联合团体著者间分隔（如"中共中央、国务院"）：刊方 S14 未规定团体著者形态 → 本项目自选回落（官方文件联合署名惯例用顿号；P3/P8 现状实践）。自然人双著者仍按 S14① 用"和"，本键不改变自然人规则。条目级联合著者仍按 GB/T 7714 逗号分隔（P8 L385–389、P9 L232/L276 条目实证），本键仅辖文内引注形态（GC-2026-1114-02）
+    zh_paren_single: "（张三，2020）"      # [JT] 中文括号式单著者引注（引 P1 build-record L2481-2482：范文实证两种文内形态并存，括号式全角括号+全角逗号；刊方 S14 仅示例叙述式，括号式为范文实测形态，PF-W12）
+    zh_paren_double: "（张三和李四，2020）" # [JT] 中文括号式双著者引注（同 P1 provenance；著者间用"和"，与叙述式 zh_double 保持一致；与英文半角 en_double 并存不冲突，GC-2026-1117-04）
+    zh_paren_multi: "（张等，2020）"        # [JT] 中文括号式多著者引注（同 P1 provenance；"等"字同 zh_multi 叙述式；GC-2026-1117-04）
   # 在线法律/政策文本：按刊方④[EB/OL] 模板著录（[S16]）：
   #   {author}, {year}. {title}[EB/OL]. （{update_date}）[{access_date}]. 网址：{url}.
   # 交叉引用刊方模板、不重复登记（单一真值源；GC-2026-1114-01）。
@@ -238,7 +241,7 @@ authors:
       other_authors: 其他作者
     bio_field_order:                       # [S17]+[JT] S17 字段清单 + 首作者全字段序内含「单位」（职位之后）；
       - 出生年                              #   「单位」非 bio 对象键，由 affiliation_ids 解析注册表拼得
-      - 性别
+      - 性别                                #   GC-2026-1117-09：本序为三档简介（第一作者/通信作者/其他作者）唯一字段序
       - 籍贯
       - 学位
       - 职称
@@ -248,20 +251,6 @@ authors:
       - 邮政编码
       - 电子邮箱
       - 电话
-    other_author_reduced_fields:           # [JT] 其余作者合并为一段，字段精简仅：出生年、性别、单位、从事工作
-      - 出生年
-      - 性别
-      - 单位
-      - 从事工作
-    corresponding_bio_fields:              # [S17] 刊方 S17 明文"所有作者均需提供姓名（出生年）、性别、籍贯、
-      - 出生年                              #   学位、职称、研究方向、通信地址、邮政编码、电子邮箱、电话"；
-      - 性别                                #   与 bio_field_order 字段清单一致（先例 [JT] 范本实测不含籍贯/
-      - 籍贯                                #   学位/职称，按 PF-RV8 优先序"刊方明示 > 国标基线 > 本项目回落"
-      - 学位                                #   取刊方明文，provenance 由 [JT] 更新为 [S17]（GC-2026-1117-02）
-      - 职称
-      - 单位
-      - 研究方向
-      - 通信地址
-      - 邮政编码
-      - 电子邮箱
-      - 电话
+    # other_author_reduced_fields 与 corresponding_bio_fields 已废止（GC-2026-1117-09）：
+    # 三档简介统一为 bio_field_order 全字段同式（_bio_full），S17 所有作者全字段 > 范本简式。
+    # schema 同步移除两键（layout-profile.schema.json bio_section properties/required）。

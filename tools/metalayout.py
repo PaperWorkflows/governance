@@ -70,18 +70,11 @@ _ZH_KW_FULL = re.compile(r"^\*{0,2}\s*关键(?:词|字)\s*\*{0,2}\s*[：:]\s*(.*
 _EN_KW_FULL = re.compile(r"^\*{0,2}\s*Key\s*words\s*\*{0,2}\s*[：:]\s*(.*)$",
                          re.IGNORECASE)
 
-# bio_field_order fallback when the profile carries none (GB/T 7713.2 + 范本 full set).
+# bio_field_order fallback when the profile carries none (GC-2026-1117-09: 三档简介唯一字段序;
+# S17 全 11 项 + 单位). GC-2026-1117-09：本序为三档简介（第一作者/通信作者/其他作者）唯一字段序。
 FALLBACK_BIO_ORDER = [
     "出生年", "性别", "籍贯", "学位", "职称", "单位",
     "研究方向", "通信地址", "邮政编码", "电子邮箱", "电话",
-]
-FALLBACK_REDUCED_ORDER = ["出生年", "性别", "单位", "从事工作"]
-
-# 通信作者* 简式八字段（范本 §8 [JT] 实测序）：无籍贯/学位/职称；电子邮箱、电话在
-# 通信地址之前；地址与邮编合写「通信地址：<addr>，邮政编码 <pc>」。stie.yaml
-# bio_section.corresponding_bio_fields 给出同序（终审返工 P2-4 落位）。
-CORRESPONDING_BIO_FIELDS = [
-    "出生年", "性别", "单位", "研究方向", "电子邮箱", "电话", "通信地址", "邮政编码",
 ]
 
 
@@ -735,8 +728,10 @@ def _units_joined(author: dict, meta: dict) -> str:
 
 def _bio_full(author: dict, meta: dict, authors_profile: dict) -> str:
     """Full bio in bio_field_order (范本 §8: name + 出生年/…/单位 inline, then
-    ;研究方向为…；通信地址：…；…；电话：….）。 Fields it lacks are skipped (no
-    fabrication); the '单位' field resolves from the registry."""
+    ；研究方向为…；通信地址：…；…；电话：….）。 Fields it lacks are skipped (no
+    fabrication); the '单位' field resolves from the registry.
+
+    GC-2026-1117-09 起为三档简介统一渲染器（第一作者/通信作者/其他作者）。"""
     ap = authors_profile or {}
     order = (ap.get("bio_section", {}) or {}).get("bio_field_order") or FALLBACK_BIO_ORDER
     bio = author.get("bio") or {}
@@ -792,117 +787,17 @@ def _bio_full(author: dict, meta: dict, authors_profile: dict) -> str:
         text += "；" + "；".join(labeled)
     return text + "。"
 
-
-def _bio_reduced(author: dict, meta: dict, authors_profile: dict) -> str:
-    """Reduced bio for the merged 其他作者 paragraph (范本 §8: 出生年、性别、
-    单位、从事工作). 从事工作 maps to bio.research_direction — author.schema.json
-    has no dedicated key (noted in the report). GC-2026-1112-06 终审返工（P3-2）:
-    从事工作按范本包装为「主要从事<rd>等工作」（段内「；」接排、段末「。」由调用方
-    拼）。"""
-    ap = authors_profile or {}
-    order = (ap.get("bio_section", {}) or {}).get("other_author_reduced_fields") \
-        or FALLBACK_REDUCED_ORDER
-    bio = author.get("bio") or {}
-    units = _units_joined(author, meta)
-    text = author.get("name") or ""
-    for field in order:
-        if field == "出生年":
-            v = bio.get("birth_year")
-            if v not in (None, ""):
-                text += f"（{v} 年生）"
-        elif field == "性别":
-            v = bio.get("gender")
-            if v:
-                text += f"，{v}"
-        elif field == "单位":
-            if units:
-                text += f"，{units}"
-        elif field == "从事工作":
-            v = bio.get("research_direction")
-            if v:
-                text += f"，主要从事{v}等工作"
-    return text
-
-
-def _bio_corresponding(author: dict, meta: dict, authors_profile: dict) -> str:
-    """Corresponding-author full bio（刊方 S17 全 11 项, GC-2026-1117-03 补全籍贯/学位/职称分支）.
-
-    与首作者全字段（_bio_full）一致，含籍贯/学位/职称；电子邮箱、电话在通信地址
-    之前；通信地址与邮政编码合写为「通信地址：<addr>，邮政编码 <pc>」（邮政编码后
-    无冒号）。字段表由 profile bio_section.corresponding_bio_fields 给定，缺省回落
-    CORRESPONDING_BIO_FIELDS。
-    """
-    ap = authors_profile or {}
-    order = (ap.get("bio_section", {}) or {}).get("corresponding_bio_fields") \
-        or CORRESPONDING_BIO_FIELDS
-    bio = author.get("bio") or {}
-    units = _units_joined(author, meta)
-    inline: list[str] = []
-    labeled: list[str] = []
-    postcode_consumed = False
-    for field in order:
-        if field == "出生年":
-            v = bio.get("birth_year")
-            if v not in (None, ""):
-                inline.append(f"（{v} 年生）")
-        elif field == "性别":
-            v = bio.get("gender")
-            if v:
-                inline.append(f"，{v}")
-        elif field == "籍贯":  # GC-2026-1117-03 补全：stie.yaml 已含全 11 项，渲染器缺籍贯/学位/职称
-            v = bio.get("hometown")
-            if v:
-                inline.append(f"，{v}人")
-        elif field == "学位":  # GC-2026-1117-03 同上
-            v = bio.get("degree")
-            if v:
-                inline.append(f"，{v}")
-        elif field == "职称":  # GC-2026-1117-03 同上
-            v = bio.get("title")
-            if v:
-                inline.append(f"，{v}")
-        elif field == "单位":
-            if units:
-                inline.append(f"，{units}")
-        elif field == "研究方向":
-            v = bio.get("research_direction")
-            if v:
-                labeled.append(f"研究方向为{v}")
-        elif field == "电子邮箱":
-            v = bio.get("email")
-            if v:
-                labeled.append(f"电子邮箱：{v}")
-        elif field == "电话":
-            v = bio.get("phone")
-            if v:
-                labeled.append(f"电话：{v}")
-        elif field == "通信地址":
-            addr = bio.get("address")
-            pc = bio.get("postcode")
-            segment = f"通信地址：{addr}" if addr else ""
-            if addr and pc:
-                segment += f"，邮政编码 {pc}"
-                postcode_consumed = True
-            if segment:
-                labeled.append(segment)
-        elif field == "邮政编码":
-            if postcode_consumed:
-                continue
-            pc = bio.get("postcode")
-            if pc:
-                labeled.append(f"邮政编码：{pc}")
-    text = (author.get("name") or "") + "".join(inline)
-    if labeled:
-        text += "；" + "；".join(labeled)
-    return text + "。"
-
-
 def generate_back_matter(meta: dict, authors_profile: dict) -> str:
     """`# 作者信息` + the four paragraphs (范本 §8). Each paragraph is a BlockText
     div with a full-width-colon label. funding goes first only when
     funding_positions includes 'back'; 其他作者 is suppressed when there is none.
     The corresponding paragraph is emitted whenever a corresponding author exists
-    — even when that author is also the first author (范本实证)."""
+    — even when that author is also the first author (范本实证).
+
+    GC-2026-1117-09：用户裁定三档简介（第一作者/通信作者/其他作者）统一为
+    bio_field_order 全 11 项字段序 + 同一渲染式（_bio_full），摒弃通信作者合写
+    邮编式与其他作者四字段简式；刊方 S17"所有作者均需提供…"全字段优先级 > 范本简式。
+    """
     ap = authors_profile or {}
     bs = (ap.get("bio_section", {}) or {})
     labels = bs.get("paragraph_labels") or {}
@@ -922,19 +817,17 @@ def generate_back_matter(meta: dict, authors_profile: dict) -> str:
 
     corresponding = meta.get("corresponding_author")
     if corresponding is not None:
-        # P2-4 (终审返工): 通信作者* 段改用范本简式八字段（_bio_corresponding），
-        # 不再复用首作者全字段（_bio_full）。
         parts.append(_div("BlockText",
                           f"{labels.get('corresponding', '通信作者*')}："
-                          f"{_bio_corresponding(corresponding, meta, ap)}"))
+                          f"{_bio_full(corresponding, meta, ap)}"))
 
     others = meta.get("other_authors") or []
     if others:
-        segs = [_bio_reduced(o, meta, ap) for o in others]
-        segs = [s for s in segs if s.strip()]
+        segs = [_bio_full(o, meta, ap) for o in others]
+        segs = [s for s in segs if s.strip() and s.strip() != "。"]
         if segs:
             parts.append(_div("BlockText",
-                              f"{labels.get('other_authors', '其他作者')}：{'；'.join(segs)}。"))
+                              f"{labels.get('other_authors', '其他作者')}：{''.join(segs)}"))
 
     return "\n\n".join(parts)
 
