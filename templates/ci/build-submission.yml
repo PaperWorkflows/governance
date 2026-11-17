@@ -4,7 +4,7 @@ name: build-submission
 # 工具链来自公共治理仓 PaperWorkflows/governance（master），本仓不内嵌副本。
 # 门禁顺序遵循治理仓 build.md：validate → build docx/pdf → snapshot → package assemble
 #   → package --verify-only --strict（投稿闸门）→ verify_layout → pack zip。
-# 产物：actions/artifact「submission-zip」，文件名 仓库名+版本号（`<repo-name>-<paper_version>.zip`）；PF-B7 传统名随 pack JSON 输出。
+# 产物：actions/artifact「submission-zip」，文件名 仓库名+版本号（`<repo-name>-<paper_version>.zip`）；PF-B7 投稿名随 pack JSON 输出。
 
 on:
   push:

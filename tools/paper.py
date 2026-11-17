@@ -27,6 +27,12 @@ try:
 except Exception as _mexc:  # pragma: no cover - hard dependency for build/check
     metalayout = None
     _metalayout_error = str(_mexc)
+# pack_submission_zip: optional dependency for `build zip` subcommand (PF-B16 local delivery).
+try:
+    import pack_submission_zip
+except Exception as _pexc:  # pragma: no cover - soft dependency
+    pack_submission_zip = None
+    _pack_zip_error = str(_pexc)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PAPER_REPO_PATTERN = re.compile(r'^P([0-9]+)-([A-Z]+(?:-[A-Z]+)*)-([0-9]{8})$')
@@ -2238,6 +2244,7 @@ def cmd_review_debate(args):
             "snapshot": cmd_build_snapshot,
             "docx": cmd_build_docx,
             "pdf": cmd_build_pdf,
+            "zip": cmd_build_zip,
             "list": cmd_build_list,
             "debate": cmd_build_debate,
         }[args.build_command](args),
@@ -2365,12 +2372,12 @@ def _first_author_name(dest: Path, paper_cfg: dict):
 
 
 def _release_file_stem(title: str, first_author: str) -> str:
-    """PF-B7 release file name: 标题（第一作者中文名）, POSIX-safe.
+    """PF-B7 release file name: {第一作者中文名}-《{中文标题}》, POSIX-safe.
 
     One expression for both the build path and the package path — the built
     artifact and the package skeleton always carry the same name.
     """
-    return _posix_safe_title(f"{title}（{first_author}）")
+    return _posix_safe_title(f"{first_author}-《{title}》")
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
@@ -4053,9 +4060,10 @@ def _cmd_build_docx_impl(args) -> tuple:
     except Exception as exc:
         # A malformed paper.yaml is a build failure, not a fallback to the draft profile.
         return ({"status": "error", "error": f"paper.yaml is unreadable: {exc}", "stage": "pre-build"}, 2)
-    # PF-B7 (GC-2026-1112-04): the release file name is 标题（第一作者中文名）. The first
-    # author is resolved BEFORE any build work — the name is part of the release
-    # record, so it is never guessed (missing → the build fails with the fix hint).
+    # PF-B7 (GC-2026-1112-04, GC-2026-1117-04): the release file name is
+    # {第一作者中文名}-《中文标题》. The first author is resolved BEFORE any build
+    # work — the name is part of the release record, so it is never guessed
+    # (missing → the build fails with the fix hint).
     try:
         first_author = _first_author_name(dest, paper_cfg)
     except Exception as exc:  # noqa: BLE001 - a broken authors.yaml is a naming failure
@@ -4066,10 +4074,10 @@ def _cmd_build_docx_impl(args) -> tuple:
                  "stage": "pre-build"}, 2)
     if not first_author:
         return ({"status": "error",
-                 "error": ("no first author found — PF-B7 requires the release file name to be "
-                           "标题（第一作者中文名）. Register the first author in paper.yaml "
-                           "(authors: - name: <中文名>, roles: [first]) or in authors.yaml, "
-                           "then rebuild."),
+                 "error": ("no first author found — PF-B7 requires the release file name "
+                           "to be {第一作者中文名}-《中文标题》. Register the first author "
+                           "in paper.yaml (authors: - name: <中文名>, roles: [first]) or "
+                           "in authors.yaml, then rebuild. (GC-2026-1117-04)"),
                  "stage": "pre-build"}, 2)
     snapshot = _create_snapshot(dest)
     try:
@@ -4332,30 +4340,38 @@ def _cmd_build_docx_impl(args) -> tuple:
         out_dir.mkdir(parents=True, exist_ok=True)
         safe_title = _release_file_stem(release_title, first_author)
         docx_out = out_dir / f"{safe_title}.docx"
-        # PF-B7: a PUBLISHED version must not be modified in place; old versions are
-        # preserved. A pending draft (review_status != "pending") is not published and
-        # may be rebuilt in place. Rebuilding a published release with different
-        # content silently destroys its release record — refuse and ask for a
-        # version bump (PF-V3) instead.
-        if docx_out.exists():
-            existing = docx_out.read_bytes()
-            if existing != output_file.read_bytes():
-                published = False
-                prev_manifest = out_dir / "manifest.json"
-                if prev_manifest.exists():
-                    try:
-                        published = json.loads(prev_manifest.read_text(encoding="utf-8")).get(
-                            "review_status", "pending") != "pending"
-                    except Exception:  # noqa: BLE001
-                        published = True
-                if published:
+        # PF-B7 (GC-2026-1117-04): the published-release guard keys on the RELEASE
+        # RECORD (manifest review_status + recorded docx sha), not on whether a
+        # file of the current release name exists — after the naming change the
+        # on-disk name is no longer a reliable indicator of the published release.
+        prev_manifest = out_dir / "manifest.json"
+        if prev_manifest.exists():
+            try:
+                prev_release = json.loads(prev_manifest.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001 - an unreadable manifest cannot prove a pending state
+                return ({"status": "error",
+                         "error": (f"build/{version}/manifest.json is unreadable — the release "
+                                   f"record cannot be verified, so an in-place rebuild is "
+                                   f"refused (PF-B7). Repair the manifest, or bump paper_version "
+                                   f"(PF-V3)."),
+                         "stage": "publish", "manifest": str(prev_manifest)}, 2)
+            if isinstance(prev_release, dict) and \
+                    str(prev_release.get("review_status", "pending")) != "pending":
+                # A published release may only be re-materialised byte-identically
+                # (idempotent rebuild, e.g. after a toolchain/naming change); any
+                # content change requires a version bump (PF-V3).
+                prev_sha = None
+                for art in prev_release.get("artifacts") or []:
+                    if isinstance(art, dict) and art.get("format") == "docx":
+                        prev_sha = art.get("sha256")
+                new_sha = hashlib.sha256(output_file.read_bytes()).hexdigest()[:16]
+                if prev_sha != new_sha:
                     return ({"status": "error",
-                             "error": (f"build/{version}/ holds a PUBLISHED release with "
-                                       f"different content; modifying a published version "
-                                       f"in place would destroy its release record "
-                                       f"(PF-B7). Bump paper_version (PF-V3) to publish a "
-                                       f"new version."),
-                             "stage": "publish", "existing_artifact": str(docx_out)}, 2)
+                             "error": (f"build/{version}/ holds a PUBLISHED release whose "
+                                       f"content differs; modifying a published version in "
+                                       f"place would destroy its release record (PF-B7). "
+                                       f"Bump paper_version (PF-V3) to publish a new version."),
+                             "stage": "publish", "manifest": str(prev_manifest)}, 2)
         shutil.copy2(output_file, docx_out)
         manifest_file = out_dir / "manifest.json"
         # T1 (GC-2026-1112-04): a rebuild must not silently reset the release state.
@@ -4475,6 +4491,33 @@ def _cmd_build_docx_impl(args) -> tuple:
 def cmd_build_docx(args):
     payload, code = _cmd_build_docx_impl(args)
     return emit(payload, code)
+
+
+def cmd_build_zip(args):
+    """PF-B16: pack the submission zip — the LOCAL delivery channel (GC-2026-1117-04).
+
+    Thin wrapper over tools/pack_submission_zip.py so the local build flow has a
+    first-class zip step; the CI channel calls the same pack logic directly.
+    The zip is a delivery artifact, not a release artifact: it is not recorded in
+    the release manifest's artifacts (PF-B7/PF-B16), and this command performs no
+    re-verification — the submission gate stays `package --verify-only --strict`.
+    """
+    if pack_submission_zip is None:
+        return emit({"status": "error",
+                     "error": f"pack_submission_zip not available: {_pack_zip_error}"}, 2)
+    dest = Path(args.paper)
+    if not dest.exists():
+        return emit({"status": "error", "error": f"Paper directory not found: {dest}"}, 2)
+    info = _get_paper_info(dest)
+    version = _norm_version(info["version"])
+    out_dir = Path(args.out) if args.out else dest / "build" / version
+    try:
+        payload = pack_submission_zip.pack(dest, out_dir, args.name)
+    except pack_submission_zip.PackError as exc:
+        return emit(payload=exc.payload, code=exc.exit_code)
+    except OSError as exc:
+        return emit({"status": "error", "error": str(exc), "stage": "pack"}, 2)
+    return emit(payload, 0)
 
 
 # ── PDF determinism normalization ────────────────────────────────
@@ -5652,6 +5695,35 @@ def _package_plan(dest: Path, version: str) -> dict:
     except Exception as exc:
         raise PackageFailure(f"release manifest is unreadable: {exc}")
 
+    # PF-B5/PF-B7 (GC-2026-1117-04, C3): the resolved artifacts must BE the ones the
+    # release manifest records — same basename and same sha256 prefix. Without this,
+    # a build that produced the docx under the new name while an old-named pdf
+    # survived (e.g. a failed pdf conversion) would let package ship a new docx with
+    # a stale pdf — A1–A5 all pass because both files merely exist.
+    for source, fmt in ((docx_source, "docx"), (pdf_source, "pdf")):
+        recorded = None
+        for art in release_manifest.get("artifacts") or []:
+            if isinstance(art, dict) and art.get("format") == fmt:
+                recorded = art
+                break
+        if recorded is None:
+            raise PackageFailure(
+                f"release manifest records no {fmt} artifact but {source.name} exists in "
+                f"{build_dir} — rebuild the release (PF-B5: docx and pdf must come from "
+                f"the same build)")
+        recorded_name = Path(str(recorded.get("path") or "")).name
+        if recorded_name != source.name:
+            raise PackageFailure(
+                f"{fmt} artifact mismatch: resolved {source.name} but the release manifest "
+                f"records {recorded_name or '(none)'} — rebuild the release (PF-B5)")
+        recorded_sha = str(recorded.get("sha256") or "")
+        if recorded_sha:
+            actual_sha = hashlib.sha256(source.read_bytes()).hexdigest()[:len(recorded_sha)]
+            if actual_sha != recorded_sha:
+                raise PackageFailure(
+                    f"{fmt} artifact sha mismatch: {source.name} does not match the release "
+                    f"manifest ({recorded_sha}…) — the package may mix builds (PF-B5)")
+
     body = _package_body(dest, spec)
     (abstract_zh, keywords, abstract_en, keywords_en,
      abstract_en_present, field_errors) = _extract_abstract(dest, spec)
@@ -6493,6 +6565,11 @@ def main():
     p_build_pdf = p_build_sub.add_parser("pdf", help="Build PDF (requires LibreOffice)")
     p_build_pdf.add_argument("--paper", required=True, help="Path to paper workspace")
 
+    p_build_zip = p_build_sub.add_parser("zip", help="Pack the submission zip (PF-B16 local delivery; repo-name + version, PF-B7 form fallback)")
+    p_build_zip.add_argument("--paper", required=True, help="Path to paper workspace")
+    p_build_zip.add_argument("--out", default=None, help="Output directory for the zip (default: build/<paper_version>)")
+    p_build_zip.add_argument("--name", default=None, help="Explicit repository name for the zip filename")
+
     p_build_list = p_build_sub.add_parser("list", help="List build releases")
     p_build_list.add_argument("--paper", required=True, help="Path to paper workspace")
 
@@ -6546,6 +6623,7 @@ def main():
             "snapshot": cmd_build_snapshot,
             "docx": cmd_build_docx,
             "pdf": cmd_build_pdf,
+            "zip": cmd_build_zip,
             "list": cmd_build_list,
             "debate": cmd_build_debate,
         }[args.build_command](args),
