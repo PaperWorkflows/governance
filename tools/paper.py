@@ -380,7 +380,7 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.4.3", date: str = None,
+                     rules_version: str = "0.5.0", date: str = None,
                      title_en: str = None, paper_version: str = "v0.1.0") -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
@@ -584,7 +584,7 @@ def cmd_proposal(args):
         title=args.title.strip(),
         author_id=author_pinyin.lower(),
         paper_type=args.paper_type,
-        rules_version="0.4.3",
+        rules_version="0.5.0",
         date=args.date,
         title_en=args.title_en.strip(),
         paper_version=args.version or "v0.1.0",
@@ -949,6 +949,41 @@ def cmd_check(args):
         }
         if existing != expected:
             overall = "fail"
+
+    # ── GC-2026-1118-01: 参考文献节三条硬断言（存在性/落地/非空） ──
+    # check 不重建：源侧读 body/paper.md，docx 侧读 build/current.json 指向版本的
+    # 交付 docx。读不到文件按 error 记录（不计 fail），避免把缺件误判成文献违规。
+    bib_gate = {"status": "pass", "assertions": []}
+    body_src = dest / "body" / "paper.md"
+    bib_docx = None
+    current_file = dest / "build" / "current.json"
+    if current_file.exists():
+        try:
+            _cv = json.loads(current_file.read_text(encoding="utf-8")).get("paper_version")
+        except Exception:  # noqa: BLE001
+            _cv = None
+        if _cv:
+            _docx_candidates = sorted((dest / "build" / str(_cv)).glob("*.docx"))
+            bib_docx = _docx_candidates[0] if _docx_candidates else None
+    if not body_src.exists():
+        bib_gate = {"status": "error", "error": f"body source missing: {body_src}",
+                    "assertions": []}
+    else:
+        try:
+            _bib_src = body_src.read_text(encoding="utf-8")
+        except OSError as exc:
+            bib_gate = {"status": "error", "error": f"cannot read {body_src}: {exc}",
+                        "assertions": []}
+        else:
+            _gates = _bibliography_gates(_bib_src, bib_docx)
+            _bib_failed = [g for g in _gates if g["status"] == "fail"]
+            bib_gate = {"status": "fail" if _bib_failed else "pass",
+                        "docx": str(bib_docx) if bib_docx else None,
+                        "assertions": _gates,
+                        "failed": [g["id"] for g in _bib_failed]}
+    results["bibliography_gates"] = bib_gate
+    if bib_gate["status"] == "fail":
+        overall = "fail"
 
     git_dir = dest / ".git"
     results["git_repo"] = {
@@ -2965,24 +3000,23 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict,
     if unused:
         notes.append({"check": "role_styles_unused_limitation", "value": unused})
 
-    # GC-2026-1117-03: Bibliography div in source must land as pStyle="Bibliography"
-    # in the docx.  Detect fenced-div declarations in the assembled source (covers both
-    # ASCII and full-width quotes on purpose — a full-width-quote declaration is the
-    # original bug that drove this gate), then assert at least one paragraph in the
-    # product carries the corresponding style.  If the docx style itself was corrupted
-    # by full-width quotes, the pStyle will carry those characters and the assertion
-    # below will catch it.
-    _bib_div_declared = bool(
-        re.search(r':::.*?custom-style=\s*(?:"Bibliography"|[\u201c\u201d]{1,2}Bibliography[\u201c\u201d]{1,2})',
-                  src_text))
-    if _bib_div_declared:
-        has_bib = "Bibliography" in used
-        if has_bib:
-            notes.append({"check": "bibliography_style_landing", "value": True})
+    # GC-2026-1118-01: 参考文献节三条硬断言（存在性/渲染落地/非空）。
+    # 原 GC-2026-1117-03 检查以「源文件存在 Bibliography 声明」为前提，整节删净后
+    # 前提为假、直接空真通过（2026-11-17 P1/P2/P8/P9 事故）。这里升级为无条件门禁：
+    # 有引注无节 / 有声明无渲染 / 有节但为空，三种都阻断构建。
+    for gate in _bibliography_gates(src_text, docx_path):
+        gid = gate["id"].lower()
+        if gate["status"] == "fail":
+            failures.append({"check": f"bibliography_gate_{gid}",
+                             "expected": gate.get("expected"), "actual": gate.get("actual"),
+                             "detail": gate.get("detail")})
+        elif gate["status"] == "error":
+            failures.append({"check": f"bibliography_gate_{gid}_unreadable",
+                             "expected": "readable docx and body source",
+                             "actual": gate.get("error"),
+                             "detail": gate.get("detail")})
         else:
-            failures.append({"check": "bibliography_style_landing",
-                             "expected": "at least one paragraph with pStyle=Bibliography",
-                             "actual": "no pStyle=Bibliography found in docx (Bibliography div declared in source)"})
+            notes.append({"check": f"bibliography_gate_{gid}", "value": gate["status"]})
     return failures, notes
 
 
@@ -5857,6 +5891,7 @@ def _package_plan(dest: Path, version: str) -> dict:
     return {
         "version": version,
         "stem": stem,
+        "paper_dir": dest,
         "docx_name": f"{stem}.docx",
         "pdf_name": f"{stem}.pdf",
         "docx_source": docx_source,
@@ -6025,6 +6060,208 @@ def _count_docx_tables(docx_path: Path) -> int:
     return len(re.findall(r"<w:tbl(?=[\s/>])", xml_text))
 
 
+# ── GC-2026-1118-01: 参考文献节三条硬断言 ────────────────────────────────────
+# 背景：2026-11-17 晚的改写波次把 P1/P2/P8/P9 的参考文献整节删净，四篇全部穿过
+# 既有门禁直达交付件。根因是三处结构性盲区：
+#   1) bibliography_style_landing 以「源文件存在 Bibliography 声明」为前提，整节
+#      删净后前提为假，检查直接跳过（空真通过）；
+#   2) manifest 的 role_styles_unused_limitation 只是 note，没有阻断权；
+#   3) 字数带宽以「# 参考文献」切分 body，删掉文献节后 body_chars 反而变小、
+#      total 更「达标」。
+# 三条断言补的正是这三个盲区：存在性（源）、渲染落地（docx）、非空（源 + docx）。
+# 五处 P10 候选池（bib 49 条、印出 15 条）是合法形态——断言只查「有没有/落没落/
+# 空不空」，不比较 references.bib 条目数与印出条目数。
+_BIB_HEADING_RE = re.compile(r"^\s{0,3}#{0,2}\s*参考文献\s*$")
+_BIB_HEADING_SCAN_RE = re.compile(r"^\s{0,3}#{1,6}\s+")
+_BIB_DIV_RE = re.compile(
+    r':::.*?custom-style=\s*(?:"Bibliography"|[\u201c\u201d]{1,2}Bibliography[\u201c\u201d]{1,2})')
+# 作者-年引注：英文 (Xxx et al., YYYY) / (Xxx & Yyy, YYYY) / (Xxx, YYYY)，
+# 中文 （Xxx等，YYYY）/(Xxx等, YYYY)。半角/全角括号都接受。刻意收窄：
+# 只认「括号内 + 大写开头作者串 + 年份」，避免把 (v0.4.24)、(2026-11-15) 等
+# 版本号/访问日期误判成引注。
+_AUTHOR_YEAR_CITE_RE = re.compile(
+    r"(?:"
+    r"[（(]\s*[A-Z][A-Za-z\u00C0-\u024F'\-\.\u2019\u2018]*"
+    r"(?:\s+[A-Z][A-Za-z\u00C0-\u024F'\-\.\u2019\u2018]*){0,5}\s*"
+    r"(?:(?:et\s+al\.?|and|&)\s*[A-Za-z\u00C0-\u024F'\-\.\u2019\u2018]*"
+    r"(?:\s+[A-Z][A-Za-z\u00C0-\u024F'\-\.\u2019\u2018]*){0,4})?"
+    r"[,，]\s*(?:19|20)\d{2}[a-z]?\s*[）)]"
+    r"|"
+    r"[（(]\s*[^（）()\n]{1,40}?等\s*[,，]\s*(?:19|20)\d{2}[a-z]?\s*[）)]"
+    r")")
+AUTHOR_YEAR_CITE_MIN = 3
+
+_BIB_FIX_HINT = ("疑似参考文献节被误删：可从 git 历史回补该节"
+                 "（git log -- body/paper.md，再 git checkout <commit> -- body/paper.md 或"
+                 "定向摘取文献节），回补后重跑 package 重建交付包")
+
+
+def _bib_strip_fenced_code(text: str) -> str:
+    """Drop fenced code blocks so code samples cannot masquerade as citations."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        if re.match(r"^\s*(?:```|~~~)", line):
+            fenced = not fenced
+            continue
+        if not fenced:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _bib_split_references(text: str) -> dict:
+    """Split body/paper.md at the reference heading.
+
+    Returns {"has_heading", "heading_line", "body_text", "references_text"}.
+    The heading form is the whole line (bare / '# 参考文献' / '## 参考文献', line
+    anchored); ``references_text`` is the section body with the heading line
+    removed and cut at the next heading (so a following appendix cannot mask an
+    empty reference section).
+    """
+    lines = text.splitlines()
+    idx = None
+    for i, line in enumerate(lines):
+        if _BIB_HEADING_RE.match(line):
+            idx = i
+            break
+    if idx is None:
+        return {"has_heading": False, "heading_line": None,
+                "body_text": text, "references_text": ""}
+    end = len(lines)
+    for j in range(idx + 1, len(lines)):
+        if _BIB_HEADING_SCAN_RE.match(lines[j]):
+            end = j
+            break
+    return {"has_heading": True, "heading_line": lines[idx].strip(),
+            "body_text": "\n".join(lines[:idx]),
+            "references_text": "\n".join(lines[idx + 1:end])}
+
+
+def _bib_count_citations(body_text: str) -> int:
+    """Author-year citation occurrences in the body region (code fences excluded)."""
+    return len(_AUTHOR_YEAR_CITE_RE.findall(_bib_strip_fenced_code(body_text)))
+
+
+def _bib_count_docx_paragraphs(docx_path: Path, style_id: str = "Bibliography") -> int:
+    """Number of <w:pStyle w:val="..."> paragraphs carrying ``style_id``.
+
+    Raises PackageFailure when the docx or its main part is unreadable — an
+    unreadable artifact is an operational error, not a bibliography assertion
+    failure (the caller records it as status 'error', never 'fail').
+    """
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            raw = zf.read("word/document.xml")
+    except (KeyError, zipfile.BadZipFile, OSError) as exc:
+        raise PackageFailure(f"cannot read word/document.xml from {docx_path}: {exc}") from exc
+    xml_text = raw.decode("utf-8", errors="replace")
+    return len(re.findall(r'<w:pStyle w:val="' + re.escape(style_id) + r'"', xml_text))
+
+
+def _bibliography_gates(source_text: str, docx_path: Path | None,
+                        references_chars: int | None = None) -> list[dict]:
+    """The three bibliography hard gates (GC-2026-1118-01).
+
+    A6 存在性：正文区（参考文献标题之前）≥3 处作者-年引注，但全文无参考文献标题
+              → fail。
+    A7 渲染落地：源文件有参考文献标题或 Bibliography 块，但 docx 中
+              pStyle="Bibliography" 段落数为 0 → fail。
+    A8 非空：参考文献节存在但节内非空白字符为 0，或 docx 中 Bibliography 段落
+             少于 1 → fail。
+
+    Missing/unreadable inputs are recorded as status 'error' (never 'fail') so a
+    broken artifact does not masquerade as a bibliography violation.
+    """
+    split = _bib_split_references(source_text)
+    body_cites = _bib_count_citations(split["body_text"])
+    declared = bool(split["has_heading"] or _BIB_DIV_RE.search(source_text))
+    results = []
+
+    # ── A6 existence ──
+    if not split["has_heading"] and body_cites >= AUTHOR_YEAR_CITE_MIN:
+        results.append({
+            "id": "A6", "name": "正文含引注但无参考文献节（存在性）", "status": "fail",
+            "author_year_citations": body_cites,
+            "expected": f">= {AUTHOR_YEAR_CITE_MIN} 处作者-年引注须对应一个参考文献节",
+            "actual": "全文无匹配 ^#{0,2}\\s*参考文献\\s*$ 的标题行",
+            "detail": (f"正文区检测到 {body_cites} 处作者-年引注，但 paper.md 里找不到"
+                       f"参考文献节标题（裸行/#/## 三种形态均未命中）。{_BIB_FIX_HINT}"),
+        })
+    else:
+        results.append({
+            "id": "A6", "name": "正文含引注但无参考文献节（存在性）", "status": "pass",
+            "author_year_citations": body_cites,
+            "heading": split["heading_line"],
+        })
+
+    # ── docx legs (A7/A8) ──
+    bib_paras = None
+    docx_error = None
+    if docx_path is None:
+        docx_error = "no docx artifact available"
+    else:
+        try:
+            bib_paras = _bib_count_docx_paragraphs(docx_path)
+        except PackageFailure as exc:
+            docx_error = str(exc)
+
+    if docx_error is not None:
+        for aid, aname in (("A7", "参考文献声明存在但渲染缺席（落地）"),
+                           ("A8", "参考文献节非空（内容）")):
+            results.append({"id": aid, "name": aname, "status": "error",
+                            "error": docx_error,
+                            "detail": "docx 不可读，本项未判定（按错误处理，不计为 fail）"})
+    else:
+        # A7: declared in source but no rendered Bibliography paragraph.
+        if declared and bib_paras == 0:
+            results.append({
+                "id": "A7", "name": "参考文献声明存在但渲染缺席（落地）", "status": "fail",
+                "declared": {"heading": split["heading_line"],
+                             "bibliography_div": bool(_BIB_DIV_RE.search(source_text))},
+                "expected": "docx 至少 1 个 pStyle=\"Bibliography\" 段落",
+                "actual": "docx 中 pStyle=\"Bibliography\" 段落数为 0",
+                "detail": ("源文件声明了参考文献节（标题或 Bibliography 块），但打包 docx 中"
+                           "没有任何 Bibliography 段落。可能是文献节被删、或 custom-style 引号"
+                           "被写成全角导致样式未落地；建议用半角双引号声明后重建交付包。"),
+            })
+        else:
+            results.append({
+                "id": "A7", "name": "参考文献声明存在但渲染缺席（落地）", "status": "pass",
+                "declared": declared, "bibliography_paragraphs": bib_paras,
+            })
+
+        # A8: section exists but empty.
+        if split["has_heading"]:
+            # Count the section body only: the heading line itself is not an entry,
+            # and ':::' fenced-div markers are not content. (plan/references_chars
+            # includes the heading line by construction, so it can never prove
+            # emptiness — it is reported alongside for traceability, not used as
+            # the emptiness criterion.)
+            sec = _count_nonwhitespace_chars(
+                "\n".join(l for l in split["references_text"].splitlines()
+                          if not re.match(r"^\s*:::", l)))
+            if sec == 0 or bib_paras < 1:
+                results.append({
+                    "id": "A8", "name": "参考文献节非空（内容）", "status": "fail",
+                    "references_chars": sec,
+                    "manifest_references_chars": references_chars,
+                    "bibliography_paragraphs": bib_paras,
+                    "expected": "参考文献节非空白字符 > 0 且 Bibliography 段落 >= 1",
+                    "actual": f"节内非空白字符 {sec}，Bibliography 段落 {bib_paras}",
+                    "detail": f"参考文献标题在、但节内没有可交付的条目。{_BIB_FIX_HINT}",
+                })
+            else:
+                results.append({
+                    "id": "A8", "name": "参考文献节非空（内容）", "status": "pass",
+                    "references_chars": sec,
+                    "manifest_references_chars": references_chars,
+                    "bibliography_paragraphs": bib_paras,
+                })
+        else:
+            results.append({"id": "A8", "name": "参考文献节非空（内容）", "status": "not_applicable",
+                            "detail": "源文件无参考文献标题；存在性由 A6 判定"})
+    return results
+
+
 def _package_assertions(plan: dict, manifest: dict) -> list:
     """A1-A5 — the PF-B16/PF-B7 cross-checks (PF-B15/B16 enforcement point)."""
     package_dir = plan["package_dir"]
@@ -6146,6 +6383,36 @@ def _package_assertions(plan: dict, manifest: dict) -> list:
                     "expected": sorted(expected_fig), "packaged": sorted(actual_fig),
                     "missing": fig_missing, "extra": fig_extra,
                     "manifest_missing": manifest_fig_missing, "registered_but_absent": registered_missing})
+
+    # ── A6-A8: bibliography hard gates (GC-2026-1118-01) ──
+    # Shipped docx first (it is the artifact the receiver opens); fall back to the
+    # release docx when the package root has not been materialised yet.
+    bib_docx = None
+    if plan.get("docx_name") and (package_dir / plan["docx_name"]).exists():
+        bib_docx = package_dir / plan["docx_name"]
+    elif plan.get("docx_source") and Path(plan["docx_source"]).exists():
+        bib_docx = Path(plan["docx_source"])
+    paper_dir = plan.get("paper_dir") or plan["build_dir"].parent.parent
+    body_file = Path(paper_dir) / "body" / "paper.md"
+    source_error = None
+    source_text = ""
+    if not body_file.exists():
+        source_error = f"body source missing: {body_file}"
+    else:
+        try:
+            source_text = body_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            source_error = f"cannot read {body_file}: {exc}"
+    if source_error is not None:
+        for aid, aname in (("A6", "正文含引注但无参考文献节（存在性）"),
+                           ("A7", "参考文献声明存在但渲染缺席（落地）"),
+                           ("A8", "参考文献节非空（内容）")):
+            results.append({"id": aid, "name": aname, "status": "error", "error": source_error,
+                            "detail": "源文件不可读，本项未判定（按错误处理，不计为 fail）"})
+    else:
+        results.extend(_bibliography_gates(
+            source_text, bib_docx,
+            references_chars=(plan.get("char_counts") or {}).get("references_chars")))
     return results
 
 
