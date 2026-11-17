@@ -1,6 +1,6 @@
 schema_version: 1
 project_id: paperfactory
-rules_version: 0.3.6
+rules_version: 0.3.7
 stage: foundation
 language: zh
 

@@ -374,7 +374,7 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.3.6", date: str = None,
+                     rules_version: str = "0.3.7", date: str = None,
                      title_en: str = None, paper_version: str = "v0.1.0") -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
@@ -578,7 +578,7 @@ def cmd_proposal(args):
         title=args.title.strip(),
         author_id=author_pinyin.lower(),
         paper_type=args.paper_type,
-        rules_version="0.3.6",
+        rules_version="0.3.7",
         date=args.date,
         title_en=args.title_en.strip(),
         paper_version=args.version or "v0.1.0",
@@ -2530,6 +2530,59 @@ def _style_block(styles_xml: str, style_id: str) -> str:
     return m.group(0) if m else ""
 
 
+def _lint_source_fenced_divs(paper_dir: Path) -> list[dict]:
+    """Lint fenced-div attribute lines in source markdown for non-ASCII quote characters.
+
+    Scans ``body/paper.md`` and ``body/*.md`` chapter files.  For each line that
+    declares a fenced div (starts with ``:::`` or ``::::``) and contains a fenced-
+    div attribute block ``{...}``, checks whether the attribute string uses full-
+    width or curly-quote characters (U+201C / U+201D / U+2018 / U+2019) — the most
+    common cause is typographer auto-correction turning ``"`` into ``"`` inside
+    ``custom-style="Bibliography"``.
+
+    Returns a list of issue dicts (empty = clean):
+
+        [{"file": "<rel-path>", "line": <1-based>, "attr": "<raw attribute snippet>"}]
+
+    Only checks the div-declaration line (the ``:::...`` line), not body text, so
+    that normal prose containing Chinese-style quotes is not flagged.
+    """
+    fullwidth_quot = re.compile(r'[\u201c\u201d\u2018\u2019]')
+    issues = []
+    body_dir = paper_dir / "body"
+    if not body_dir.exists():
+        return issues
+    candidates = list(body_dir.glob("*.md"))
+    # Ensure body/paper.md is always checked first (it's the authoritative source)
+    paper_md = body_dir / "paper.md"
+    if paper_md in candidates:
+        candidates.remove(paper_md)
+    candidates.sort()
+    if paper_md.exists():
+        candidates.insert(0, paper_md)
+    for fpath in candidates:
+        if fpath.name == "README.md":
+            continue
+        lines = fpath.read_text(encoding="utf-8").splitlines()
+        for idx, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            # Only check fenced-div declaration lines (::: or :::::)
+            if not stripped.startswith((":::",)):
+                continue
+            # Must have an attribute block {...}
+            attr_match = re.search(r'\{([^}]*)\}', stripped)
+            if not attr_match:
+                continue
+            attr_content = attr_match.group(1)
+            if fullwidth_quot.search(attr_content):
+                issues.append({
+                    "file": str(fpath.relative_to(paper_dir)),
+                    "line": idx,
+                    "attr": attr_content.strip(),
+                })
+    return issues
+
+
 def _rsvg_stderr_snippet(stderr: str) -> str:
     """Extract a stderr snippet relevant to the rsvg-convert failure.
 
@@ -2558,8 +2611,17 @@ def _rsvg_stderr_snippet(stderr: str) -> str:
     return snippet
 
 
-def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[list, list]:
+def _assert_layout_landing(docx_path: Path, role: dict, merged: dict,
+                           src_text: str = "") -> tuple[list, list]:
     """Profile-landing assertions on the produced docx (PF-B3 implementation carrier).
+
+    Args:
+        docx_path: path to the produced .docx
+        role: resolved role dict from layout merge
+        merged: full merged layout dict
+        src_text: assembled markdown source text (before pandoc).  Used to
+                  detect Bibliography fenced divs so the output docx can be
+                  verified.
 
     Returns (failures, notes): failures must be empty or the build fails;
     notes are recorded in the manifest (no silent degradation).
@@ -2870,9 +2932,8 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
     notes.append({"check": "omath_count", "value": docxml.count("<m:oMath")})
     notes.append({"check": "media_images", "value": len([n for n in parts if n.startswith("word/media/")])})
 
-    # Role coverage: a profile role whose paragraph style is defined but never used
-    # in the product means the role silently did not reach the page. This is recorded
-    # as a limitation, so a reviewer can see it (PF-B12 no-silent-degradation).
+    # Role coverage / style extraction (moved before bibliography gate so `used`
+    # is defined when first referenced).
     used = set(re.findall(r'<w:pStyle w:val="([^"]+)"', docxml))
     # The style each profile role is expected to land in. `affiliation` maps to
     # the dedicated Affiliation role (GC-2026-1112-06: the generated affiliation
@@ -2896,6 +2957,25 @@ def _assert_layout_landing(docx_path: Path, role: dict, merged: dict) -> tuple[l
     }})
     if unused:
         notes.append({"check": "role_styles_unused_limitation", "value": unused})
+
+    # GC-2026-1117-03: Bibliography div in source must land as pStyle="Bibliography"
+    # in the docx.  Detect fenced-div declarations in the assembled source (covers both
+    # ASCII and full-width quotes on purpose — a full-width-quote declaration is the
+    # original bug that drove this gate), then assert at least one paragraph in the
+    # product carries the corresponding style.  If the docx style itself was corrupted
+    # by full-width quotes, the pStyle will carry those characters and the assertion
+    # below will catch it.
+    _bib_div_declared = bool(
+        re.search(r':::.*?custom-style=\s*(?:"Bibliography"|[\u201c\u201d]{1,2}Bibliography[\u201c\u201d]{1,2})',
+                  src_text))
+    if _bib_div_declared:
+        has_bib = "Bibliography" in used
+        if has_bib:
+            notes.append({"check": "bibliography_style_landing", "value": True})
+        else:
+            failures.append({"check": "bibliography_style_landing",
+                             "expected": "at least one paragraph with pStyle=Bibliography",
+                             "actual": "no pStyle=Bibliography found in docx (Bibliography div declared in source)"})
     return failures, notes
 
 
@@ -4069,6 +4149,24 @@ def _cmd_build_docx_impl(args) -> tuple:
             return ({"status": "error", "error": f"metadata assembly failed: {exc}",
                      "stage": "pre-build"}, 2)
 
+        # GC-2026-1117-03: source-level lint — fenced div attributes must not use
+        # full-width or curly-quote characters.  This is the "治根" gate: fail early
+        # before pandoc, so the author gets a precise file:line hint instead of a
+        # silent style-miss in the output docx.
+        source_lint_issues = _lint_source_fenced_divs(dest)
+        if source_lint_issues:
+            detail_lines = [
+                f"{iss['file']}:{iss['line']} attribute={iss['attr']!r}"
+                for iss in source_lint_issues
+            ]
+            return ({"status": "error",
+                     "error": ("fenced-div attributes contain non-ASCII quote characters "
+                               "(U+201C / U+201D / U+2018 / U+2019); "
+                               "pandoc will carry them verbatim into the docx pStyle, "
+                               "breaking layout landing (GC-2026-1117-03)"),
+                     "stage": "pre-build",
+                     "source_lint": source_lint_issues}, 1)
+
         output_file = temp_build_dir / "paper.docx"
         cmd = [
             "pandoc", str(assembly_path),
@@ -4154,7 +4252,8 @@ def _cmd_build_docx_impl(args) -> tuple:
             citations_marked = _apply_citation_superscript(output_file)
 
         # ── profile-landing assertions (hard fail; no silent degradation) ──
-        failures, layout_notes = _assert_layout_landing(output_file, layout["role"], layout["merged"])
+        failures, layout_notes = _assert_layout_landing(output_file, layout["role"], layout["merged"],
+                                                        src_text=src_text)
         layout_notes.append({"check": "table_rows_cantsplit_tblheader", "value": table_rows_hardened})
         layout_notes.append({"check": "header_footer_relationship_repair", "value": hf_repair})
         if citations_marked is not None:
