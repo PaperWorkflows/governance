@@ -5,17 +5,17 @@
 Usage:
     pack_submission_zip.py --paper <paper_dir> [--out <output_dir>] [--name <repo_name>]
 
-Naming (2026-11-17 GC-2026-1117-04)：
+Naming (2026-11-17 GC-2026-1117-04, GC-2026-1117-07)：
     产物 zip 名 = **仓库名 + 版本号**，即 ``<repo-name>-<paper_version>.zip``。
     仓库名按以下优先级取得：``--name`` 显式指定 > 论文仓 git remote origin 的仓名 >
-    兜底投稿名 ``{first}-《{title}》.zip``（无 remote 时，使用第一作者中文名加
-    标题的全角书名号）（GC-2026-1117-04）。
-    PF-B7/venue S19 的投稿名 ``{first}-《{title}》.zip`` 随 JSON 输出一并打印，
-    便于编辑部场景取用（GC-2026-1117-04）。
+    兜底投稿名 ``{first}-《{title}》-v{version}.zip``（无 remote 时，使用第一作者中文名加
+    标题的全角书名号与版本号后缀）（GC-2026-1117-04, GC-2026-1117-07）。
+    PF-B7/venue S19 的投稿名 ``{first}-《{title}》-v{version}.zip`` 随 JSON 输出一并打印，
+    便于编辑部场景取用（GC-2026-1117-04, GC-2026-1117-07）。
 
 Contract with governance:
   * PF-B7   the package directory is zip-ready; packing is the delivery step.
-  * PF-B7   release filenames: ``{first_author}-《{title}》.docx/pdf`` (GC-2026-1117-04).
+  * PF-B7   release filenames: ``{first_author}-《{title}》-v{version}.docx/pdf`` (GC-2026-1117-04, GC-2026-1117-07).
   * PF-B16  ``package --verify-only --strict`` must pass before any zip is sent;
             this tool does not re-verify — callers run the gate first.
   * ``paper.py build zip`` is a thin wrapper that delegates to ``pack_submission_zip.pack()``.
@@ -125,7 +125,7 @@ def pack(paper_dir: Path, out_dir: Path, name: str | None = None) -> dict:
     else:
         # No git remote (e.g. a bare source tree) — fall back to the PF-B7 name.
         # (GC-2026-1117-04)
-        zip_name = _posix_safe(f"{first}-《{title}》") + ".zip"
+        zip_name = _posix_safe(f"{first}-《{title}》-{version}") + ".zip"  # GC-2026-1117-07
         naming = "pf-b7-title"
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ def pack(paper_dir: Path, out_dir: Path, name: str | None = None) -> dict:
         "version": version,
         "title": title,
         "first_author": first,
-        "submission_name_pf_b7": _posix_safe(f"{first}-《{title}》") + ".zip",  # (GC-2026-1117-04)
+        "submission_name_pf_b7": _posix_safe(f"{first}-《{title}》-{version}") + ".zip",  # GC-2026-1117-04, GC-2026-1117-07
         "entries": len(files),
         "bytes": zip_path.stat().st_size,
         "sha256": digest,
@@ -168,7 +168,7 @@ def pack(paper_dir: Path, out_dir: Path, name: str | None = None) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Pack submission zip (repo-name + version; fallback: {first}-《{title}》.zip per GC-2026-1117-04)")
+        description="Pack submission zip (repo-name + version; fallback: {first}-《{title}》-v{version}.zip per GC-2026-1117-04, GC-2026-1117-07)")
     ap.add_argument("--paper", required=True, help="paper workspace directory")
     ap.add_argument("--out", default="dist", help="output directory for the zip")
     ap.add_argument("--name", default=None, help="explicit repository name for the zip filename")

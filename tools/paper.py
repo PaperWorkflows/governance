@@ -380,7 +380,7 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.4.0", date: str = None,
+                     rules_version: str = "0.4.1", date: str = None,
                      title_en: str = None, paper_version: str = "v0.1.0") -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
@@ -584,7 +584,7 @@ def cmd_proposal(args):
         title=args.title.strip(),
         author_id=author_pinyin.lower(),
         paper_type=args.paper_type,
-        rules_version="0.4.0",
+        rules_version="0.4.1",
         date=args.date,
         title_en=args.title_en.strip(),
         paper_version=args.version or "v0.1.0",
@@ -2371,13 +2371,13 @@ def _first_author_name(dest: Path, paper_cfg: dict):
     return first_author
 
 
-def _release_file_stem(title: str, first_author: str) -> str:
-    """PF-B7 release file name: {第一作者中文名}-《{中文标题}》, POSIX-safe.
+def _release_file_stem(title: str, first_author: str, version: str) -> str:
+    """PF-B7 release file name: {第一作者中文名}-《{中文标题}》-v{版本号}, POSIX-safe.
 
     One expression for both the build path and the package path — the built
-    artifact and the package skeleton always carry the same name.
+    artifact and the package skeleton always carry the same name. (GC-2026-1117-07)
     """
-    return _posix_safe_title(f"{first_author}-《{title}》")
+    return _posix_safe_title(f"{first_author}-《{title}》-{version}")
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
@@ -4060,8 +4060,8 @@ def _cmd_build_docx_impl(args) -> tuple:
     except Exception as exc:
         # A malformed paper.yaml is a build failure, not a fallback to the draft profile.
         return ({"status": "error", "error": f"paper.yaml is unreadable: {exc}", "stage": "pre-build"}, 2)
-    # PF-B7 (GC-2026-1112-04, GC-2026-1117-04): the release file name is
-    # {第一作者中文名}-《中文标题》. The first author is resolved BEFORE any build
+    # PF-B7 (GC-2026-1112-04, GC-2026-1117-04, GC-2026-1117-07): the release file name is
+    # {第一作者中文名}-《中文标题》-v{版本号}. The first author is resolved BEFORE any build
     # work — the name is part of the release record, so it is never guessed
     # (missing → the build fails with the fix hint).
     try:
@@ -4075,9 +4075,9 @@ def _cmd_build_docx_impl(args) -> tuple:
     if not first_author:
         return ({"status": "error",
                  "error": ("no first author found — PF-B7 requires the release file name "
-                           "to be {第一作者中文名}-《中文标题》. Register the first author "
+                           "to be {第一作者中文名}-《中文标题》-v{版本号}. Register the first author "
                            "in paper.yaml (authors: - name: <中文名>, roles: [first]) or "
-                           "in authors.yaml, then rebuild. (GC-2026-1117-04)"),
+                           "in authors.yaml, then rebuild. (GC-2026-1112-04, GC-2026-1117-04, GC-2026-1117-07)"),
                  "stage": "pre-build"}, 2)
     snapshot = _create_snapshot(dest)
     try:
@@ -4338,7 +4338,7 @@ def _cmd_build_docx_impl(args) -> tuple:
         import shutil
         out_dir = dest / "build" / version
         out_dir.mkdir(parents=True, exist_ok=True)
-        safe_title = _release_file_stem(release_title, first_author)
+        safe_title = _release_file_stem(release_title, first_author, version)  # GC-2026-1117-07
         docx_out = out_dir / f"{safe_title}.docx"
         # PF-B7 (GC-2026-1117-04): the published-release guard keys on the RELEASE
         # RECORD (manifest review_status + recorded docx sha), not on whether a
@@ -5679,7 +5679,7 @@ def _package_plan(dest: Path, version: str) -> dict:
     first_author = _first_author_name(dest, paper_cfg)
     if not first_author:
         raise PackageFailure("no first author found — paper.yaml/authors.yaml must register roles containing 'first'")
-    stem = _release_file_stem(title, first_author)
+    stem = _release_file_stem(title, first_author, version)  # GC-2026-1117-07
 
     build_dir = dest / "build" / version
     if not build_dir.is_dir():
