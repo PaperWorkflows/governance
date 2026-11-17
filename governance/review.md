@@ -34,7 +34,7 @@ This file defines the review mode execution rules. Review mode covers: four-pers
 
 - P0 (blocking): invalidates core authenticity, correctness, independence, or delivery safety. Examples: fabricated results, key proof error, snapshot mixing. Unresolved = not a deliverable.
 - P1 (important): affects evidence sufficiency, interpretation, reproduction, or style compliance. Must be fixed and re-verified, or proven non-applicable with evidence. Cannot be simply recorded and passed.
-- P2 (improvement): expression or presentation improvement that does not affect current requirement satisfaction. May be recorded as not adopted with reason.
+- P2 (improvement): expression or presentation improvement that does not affect current requirement satisfaction. May be recorded as not adopted with reason. 正文中残存的“不再重复”、“（定位，非贡献）”等免责甩锅或合规便签字样（违反 PF-W9.1）统一计 P2 缺陷，要求清洗为规范学术界定，严禁 Reviewer 反向逼迫正文通过贴标签自贬来避嫌。
 - Report must include: input snapshot and rule version, applicable rule coverage, check method, actual execution record, issue location, rule basis, grade, suggested fix conditions, and limitations.
 - Overall status: pass, needs-fix, or incomplete. Warning count does not substitute for complete conclusion.
 

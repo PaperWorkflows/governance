@@ -380,7 +380,7 @@ def create_github_repo(repo_name: str, private: bool = True) -> dict:
     return {"created": True, "repo": f"{GITHUB_ORG}/{repo_name}"}
 
 def build_paper_yaml(pid: str, title: str, author_id: str, paper_type: str,
-                     rules_version: str = "0.4.2", date: str = None,
+                     rules_version: str = "0.4.3", date: str = None,
                      title_en: str = None, paper_version: str = "v0.1.0") -> str:
     """Build complete paper.yaml content from proposal inputs."""
     pid_number = pid.split("-")[0]
@@ -584,7 +584,7 @@ def cmd_proposal(args):
         title=args.title.strip(),
         author_id=author_pinyin.lower(),
         paper_type=args.paper_type,
-        rules_version="0.4.2",
+        rules_version="0.4.3",
         date=args.date,
         title_en=args.title_en.strip(),
         paper_version=args.version or "v0.1.0",
@@ -1806,7 +1806,7 @@ def cmd_writing_debate(args):
         "- W6: Literature citation verification\n"
         "- W7: Privacy, license, technical conditions\n"
         "- W8: Figures, tables, formulas, terminology\n"
-        "- W9: Self-sufficiency and reader understanding\n"
+        "- W9: Self-sufficiency and academic rhetoric (PF-W9.1: strict self-contained cross-references with in-line summary; zero lazy phrases like '不再重复'; zero internal audit tags like '(定位，非贡献)' in headings/body; sections never used as grammatical subjects)\n"
         "- W10: Claim-evidence correspondence and limitations\n\n"
         "Provide: (1) overall assessment, (2) strengths, (3) weaknesses, "
         "(4) specific improvements. Be concise.\n\n" + context

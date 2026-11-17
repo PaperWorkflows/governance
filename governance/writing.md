@@ -80,6 +80,11 @@ This file defines the writing mode execution rules. Writing mode covers: paper b
 - No unsupported superlatives: "leading", "perfect", "universal", "breakthrough". "Improved" or "superior" must name comparison object and conditions.
 - Do not use detector scores, punctuation density, or fixed word blacklists as quality substitutes.
 - Check necessity paragraph by paragraph against fixed body. Identify repetition, empty transitions, concept stacking, and padding.
+- **PF-W9.1 学术修辞与自足叙事铁律**：
+  - 严禁免责/甩锅式元语：正文严禁出现“不再重复”、“不再赘述”、“同前所述”、“见上文不作展开”等生硬推脱表述。
+  - 严禁合规审计便签进入正文：严禁在标题、表头、正文中出现“（定位，非贡献）”、“未作扩大”、“协议要求声明”等内部自查标签；所有理论定位与贡献边界必须转化为成熟、自足的学术范围界定（Scoping）。
+  - 交叉引用自足原则：严禁将章节号作为句子主谓成分，严禁无摘要的裸指针跳转；引用前文机制时，必须给出【一句话最小核心事实摘要】，并将章节号降级为括号从属索引（如“鉴于状态机副本的有序性要求（第 3.1 节）…”）。
+  - 正文写作严禁吸收格式范本的正文措辞，必须以 `templates/exemplars/writing/` 中的顶级期刊长文为修辞基准。
 
 ### PF-W10 主张证据与局限
 
